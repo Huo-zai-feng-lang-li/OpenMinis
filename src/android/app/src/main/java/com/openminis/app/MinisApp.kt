@@ -47,6 +47,7 @@ import com.openminis.app.sandbox.offload.LocationOffloadHandler
 import com.openminis.app.sandbox.offload.ModelUseOffloadHandler
 import com.openminis.app.sandbox.offload.SessionsOffloadHandler
 import com.openminis.app.sandbox.offload.ShizukuOffloadHandler
+import com.openminis.app.sandbox.offload.VdOffloadHandler
 import com.openminis.app.sandbox.offload.NotificationOffloadHandler
 import com.openminis.app.sandbox.offload.OpenOffloadHandler
 import com.openminis.app.sandbox.offload.PhotosOffloadHandler
@@ -799,6 +800,11 @@ class MinisApp : Application(), ImageLoaderFactory {
         // can register unconditionally; ShizukuManager.init below wires
         // up the binder lifecycle listeners + StateFlow.
         NativeOffloadServer.register("android-shizuku-cli", ShizukuOffloadHandler(this))
+        // T-android-virtual-display-p0: android-vd-cli — P0 in-process
+        // virtual display (create/list/shot/launch/tap/release). The stub at
+        // /usr/local/bin/android-vd-cli is picked up automatically by
+        // PRootKernel.installHandlerStubs() on the next rootfs boot.
+        NativeOffloadServer.register("android-vd-cli", VdOffloadHandler(this))
         com.openminis.app.offload.ShizukuManager.init(this)
 
         // T-android-minis-debug-cli: shell-side CLI wrapper around the in-app

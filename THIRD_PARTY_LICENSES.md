@@ -50,6 +50,12 @@ Transitive packages (pinned in `Package.resolved`), all **Apache-2.0**, maintain
 
 Test-only dependencies: JUnit 4.13.2 (**EPL-1.0**), MockWebServer 4.12.0 (**Apache-2.0**), kotlinx-coroutines-test 1.9.0 (**Apache-2.0**), org.json 20231013 (**Public Domain / JSON License**), sqlite-jdbc 3.41.2.2 (**Apache-2.0**), Robolectric 4.17 (**MIT**).
 
+## Ported upstream code
+
+| Code | Source | License | Notes |
+|---|---|---|---|
+| `app/display/MinisAgentDisplay.kt` (virtual display flags, ImageReader frame pipeline, upright geometry, black-frame sampler, 4s display keep-awake) | [wangzan101/Mika](https://github.com/wangzan101/Mika) — `cap/phone/display/AgentDisplay.kt`, `DisplayFrameGeometry.kt`, `DisplayFrame.kt`, `FrameMath.kt` (`isBlack`), `shell/ShellService.kt` (`displayFlags`, `setFullscreenWindowingMode`, `setImePolicy`, `userActivity` keep-awake), `shell/DisplayAwake.kt` (at tag `7101e99`) | **Apache-2.0** | Apache-2.0 is compatible with the repo's GPLv3. Ported files carry the Apache-2.0 attribution + "Ported from wangzan101/Mika" header comment |
+
 ## Bundled web/UI assets
 
 | Asset | Location | License |

@@ -62,7 +62,7 @@ Usage:
   android-a11y-cli <group> <subcommand> [flags]
 
 Groups:
-  ui        dump | find | info | node | screenshot
+  ui        dump | find | info | node | screenshot | displays
   tap       node | xy | text | id
   input     text | clear | key
   scroll    node | xy | to-text
@@ -80,7 +80,19 @@ Use --compact to emit on a single line; --quiet to strip the envelope.
 First-run: enable "Minis" under Settings → Accessibility, then `service ping`.
 """
         private const val SERVICE_HELP = "service status | ping\n"
-        private const val UI_HELP = """ui dump | find | info | node | screenshot
+        private const val UI_HELP = """ui dump | find | info | node | screenshot | displays
+
+  Common:
+    --display <int>            Display id to scope the command to (default 0
+                               = default display). Accepts dump, find, info,
+                               and screenshot. With a non-zero value the roots
+                               come from `svc.rootsForDisplay(id)` (P0 virtual
+                               display), i.e. only windows the a11y service
+                               can see on that display.
+
+  ui displays                  List every display (system + virtual) with how
+                               many a11y-visible windows sit on each.
+    outputs [{displayId, name, width, height, a11yWindows, focused}]
 
   ui screenshot                Capture a system-wide screenshot via
                                AccessibilityService.takeScreenshot (API 30+).
@@ -290,8 +302,50 @@ First-run: enable "Minis" under Settings → Accessibility, then `service ping`.
             "info"       -> uiInfo(args)
             "node"       -> uiNode(args)
             "screenshot" -> uiScreenshot(args, sessionId)
+            // P0 virtual display: enumerate displays and their a11y-visible windows.
+            "displays"   -> uiDisplays(args)
             else         -> NativeOffloadResult(2, "$TOOL ui: unknown action\n$UI_HELP")
         }
+    }
+
+    /**
+     * P0 virtual display: `[{displayId, name, width, height, a11yWindows, focused}]`
+     * over every system display (DisplayManager) merged with any display the
+     * a11y service sees windows on that DisplayManager does not enumerate
+     * (e.g. another process's private virtual display).
+     */
+    private fun uiDisplays(args: OffloadArgs): NativeOffloadResult {
+        val svc = svcOrThrow()
+        val dm = context.getSystemService(android.hardware.display.DisplayManager::class.java)
+        val arr = JSONArray()
+        val covered = HashSet<Int>()
+        try {
+            for (d in dm.displays) {
+                val wins = svc.windowsForDisplay(d.displayId)
+                val m = android.util.DisplayMetrics()
+                d.getRealMetrics(m) // deprecated API 33+; still the all-versions answer
+                covered.add(d.displayId)
+                arr.put(JSONObject()
+                    .put("displayId", d.displayId)
+                    .put("name", d.name?.toString() ?: "")
+                    .put("width", m.widthPixels)
+                    .put("height", m.heightPixels)
+                    .put("a11yWindows", wins.size)
+                    .put("focused", wins.any { it.isFocused }))
+            }
+        } catch (_: Throwable) {}
+        for (id in svc.visibleDisplayIds()) {
+            if (id in covered) continue
+            val wins = svc.windowsForDisplay(id)
+            arr.put(JSONObject()
+                .put("displayId", id)
+                .put("name", "")
+                .put("width", -1)
+                .put("height", -1)
+                .put("a11yWindows", wins.size)
+                .put("focused", wins.any { it.isFocused }))
+        }
+        return ok(args, JSONObject().put("count", arr.length()).put("displays", arr))
     }
 
     private fun uiDump(args: OffloadArgs): NativeOffloadResult {
@@ -299,11 +353,13 @@ First-run: enable "Minis" under Settings → Accessibility, then `service ping`.
         val maxDepth = args.getInt("depth") ?: 10
         val compact = args.hasFlag("compact")
         val visibleOnly = args.getBool("visible-only") ?: true
+        // P0 virtual display: restrict the dump to one display when --display is given.
+        val displayId = args.getInt("display") ?: Display.DEFAULT_DISPLAY
         val arr = JSONArray()
-        for (root in svc.rootNodes()) {
+        for (root in svc.rootsForDisplay(displayId)) {
             walkNode(svc.nodeRegistry, root, 0, maxDepth, visibleOnly, compact, arr)
         }
-        return ok(args, JSONObject().put("count", arr.length()).put("nodes", arr))
+        return ok(args, JSONObject().put("displayId", displayId).put("count", arr.length()).put("nodes", arr))
     }
 
     private fun walkNode(
@@ -359,8 +415,10 @@ First-run: enable "Minis" under Settings → Accessibility, then `service ping`.
         val svc = svcOrThrow()
         val limit = args.getInt("limit") ?: 50
         val depth = args.getInt("depth") ?: 30
+        // P0 virtual display: restrict the search to one display when --display is given.
+        val displayId = args.getInt("display") ?: Display.DEFAULT_DISPLAY
         val matches = ArrayList<AccessibilityNodeInfo>()
-        for (root in svc.rootNodes()) {
+        for (root in svc.rootsForDisplay(displayId)) {
             findMatching(root, args, depth, 0, matches, limit)
             if (matches.size >= limit) break
         }
@@ -371,7 +429,7 @@ First-run: enable "Minis" under Settings → Accessibility, then `service ping`.
         } else {
             for (m in matches) arr.put(nodeToJson(svc.nodeRegistry, m, 0, compact = false))
         }
-        return ok(args, JSONObject().put("count", arr.length()).put("data", arr))
+        return ok(args, JSONObject().put("displayId", displayId).put("count", arr.length()).put("data", arr))
     }
 
     private fun findMatching(
@@ -405,16 +463,21 @@ First-run: enable "Minis" under Settings → Accessibility, then `service ping`.
     private fun uiInfo(args: OffloadArgs): NativeOffloadResult {
         val svc = svcOrThrow()
         val (pkg, cls) = svc.foregroundPackage()
-        val windows = svc.windowInfos()
+        // P0 virtual display: filter the window list to one display when --display is given.
+        val displayId = args.getInt("display")
+        val allWindows = svc.windowInfos()
+        val windows = if (displayId != null) allWindows.filter { it["displayId"] == displayId } else allWindows
         val winArr = JSONArray()
         for (w in windows) {
             winArr.put(JSONObject().apply { for ((k, v) in w) put(k, v ?: JSONObject.NULL) })
         }
-        return ok(args, JSONObject()
+        val data = JSONObject()
             .put("packageName", pkg ?: "")
             .put("activityName", cls ?: "")
             .put("windowCount", windows.size)
-            .put("windows", winArr))
+            .put("windows", winArr)
+        if (displayId != null) data.put("displayId", displayId)
+        return ok(args, data)
     }
 
     private fun uiNode(args: OffloadArgs): NativeOffloadResult {
@@ -1234,6 +1297,7 @@ First-run: enable "Minis" under Settings → Accessibility, then `service ping`.
                 "info"       -> "a11y_cli: reading UI info"
                 "node"       -> "a11y_cli: reading node ${target ?: ""}".trim()
                 "screenshot" -> "a11y_cli: capturing screenshot"
+                "displays"   -> "a11y_cli: listing displays"
                 else         -> "a11y_cli: ui"
             }
             "tap" -> when (v) {

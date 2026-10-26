@@ -131,6 +131,79 @@ class MinisAccessibilityService : AccessibilityService() {
         return out
     }
 
+    // ── P0 virtual-display surface: per-display window/root access ─────────
+    //
+    // `getWindowsOnAllDisplays` only exists on API 30+, and the per-display
+    // `displayId` on a11y windows follows the same gate; on older systems
+    // everything lives on the default display and the fallbacks below are
+    // the only correct answers.
+
+    /** Display ids this a11y service (user 0) currently has windows on. */
+    fun visibleDisplayIds(): Set<Int> {
+        val ids = LinkedHashSet<Int>()
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                ids.addAll(windowsOnAllDisplays.keys.toList())
+            } else {
+                if (windows != null) ids.add(Display.DEFAULT_DISPLAY)
+            }
+        } catch (_: Throwable) {}
+        if (ids.isEmpty()) ids.add(Display.DEFAULT_DISPLAY)
+        return ids
+    }
+
+    /** All a11y-visible windows on [displayId] (empty when the display has none). */
+    fun windowsForDisplay(displayId: Int): List<android.view.accessibility.AccessibilityWindowInfo> {
+        return when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R ->
+                windowsOnAllDisplays[displayId].orEmpty()
+            displayId == Display.DEFAULT_DISPLAY -> windows.orEmpty()
+            else -> emptyList()
+        }
+    }
+
+    /** Root nodes of every a11y-visible window on [displayId]. */
+    fun rootsForDisplay(displayId: Int): List<AccessibilityNodeInfo> {
+        val out = ArrayList<AccessibilityNodeInfo>()
+        try {
+            for (w in windowsForDisplay(displayId)) {
+                w.root?.let { out.add(it) }
+            }
+        } catch (_: Throwable) {}
+        if (out.isEmpty() && displayId == Display.DEFAULT_DISPLAY) {
+            try { rootInActiveWindow?.let { out.add(it) } } catch (_: Throwable) {}
+        }
+        return out
+    }
+
+    /**
+     * Dispatch a single-stroke gesture pinned to [displayId] — ported from
+     * Mika `ScreenAccessibility.dispatch` (Apache-2.0): the display is set
+     * with the PUBLIC `GestureDescription.Builder.setDisplayId` (API 30+),
+     * which routes the gesture to that display instead of the focused one.
+     *
+     * P0 keeps main-screen gestures only on API < 30: the system has no
+     * per-display gesture routing there, so the stroke goes to the focused
+     * display. Coordinate taps on virtual displays are covered on modern
+     * systems by this method plus the Shizuku `input -d` path.
+     */
+    fun dispatchGestureOn(displayId: Int, path: Path, startTime: Long, durationMs: Long, timeoutMs: Long = 5_000): Boolean {
+        val stroke = GestureDescription.StrokeDescription(path, startTime, durationMs)
+        val builder = GestureDescription.Builder().addStroke(stroke)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            builder.setDisplayId(displayId)
+        }
+        val gesture = builder.build()
+        val done = CountDownLatch(1)
+        val ok = booleanArrayOf(false)
+        val callback = object : GestureResultCallback() {
+            override fun onCompleted(g: GestureDescription?) { ok[0] = true; done.countDown() }
+            override fun onCancelled(g: GestureDescription?) { ok[0] = false; done.countDown() }
+        }
+        Handler(Looper.getMainLooper()).post { dispatchGesture(gesture, callback, null) }
+        return done.await(timeoutMs, TimeUnit.MILLISECONDS) && ok[0]
+    }
+
     fun windowInfos(): List<Map<String, Any?>> {
         val out = ArrayList<Map<String, Any?>>()
         try {
@@ -147,6 +220,9 @@ class MinisAccessibilityService : AccessibilityService() {
                     "title" to (w.title?.toString() ?: ""),
                     "focused" to w.isFocused,
                     "active" to w.isActive,
+                    // P0 virtual display: expose which display a window belongs to so
+                    // the CLI can tell main-screen windows from virtual-display windows.
+                    "displayId" to w.displayId,
                 ))
             }
         } catch (_: Throwable) {}

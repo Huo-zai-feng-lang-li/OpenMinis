@@ -347,6 +347,9 @@ class ShizukuOffloadHandler(private val context: Context) : NativeOffloadHandler
         args.get("package", "p")?.let { cmd.addAll(listOf("-p", it)) }
         args.get("component", "c")?.let { cmd.addAll(listOf("-n", it)) }
         args.get("user")?.let { cmd.addAll(listOf("--user", it)) }
+        // P0 virtual display: `am start` natively accepts --display <id>
+        // (the virtual display id from `android-vd-cli create`).
+        args.get("display")?.let { cmd.addAll(listOf("--display", it)) }
         // Extras: --extra-string key=value (parser surfaces as values)
         for ((k, v) in extras(args, "extra-string")) {
             cmd.addAll(listOf("--es", k, v))
@@ -662,34 +665,60 @@ class ShizukuOffloadHandler(private val context: Context) : NativeOffloadHandler
     private fun handleInput(rest: List<String>, args: OffloadArgs): NativeOffloadResult {
         val sub = rest.firstOrNull() ?: return ok(INPUT_HELP)
         return when (sub) {
-            "tap" -> inputTap(args.positional.getOrNull(1), args.positional.getOrNull(2), args)
-            "swipe" -> inputSwipe(args.positional.drop(1), args)
-            "key" -> inputKey(args.positional.getOrNull(1), args)
-            "text" -> inputText(args.positional.drop(1).joinToString(" "), args)
+            "tap" -> inputTap(args.positional.getOrNull(1), args.positional.getOrNull(2), rest, args)
+            "swipe" -> inputSwipe(args.positional.drop(1), rest, args)
+            "key" -> inputKey(args.positional.getOrNull(1), rest, args)
+            "text" -> inputText(args.positional.drop(1).joinToString(" "), rest, args)
             "help", "--help", "-h" -> ok(INPUT_HELP)
             else -> NativeOffloadResult(2, "input: unknown subcommand '$sub'\n$INPUT_HELP")
         }
     }
 
-    private fun inputTap(x: String?, y: String?, args: OffloadArgs): NativeOffloadResult {
-        if (x.isNullOrBlank() || y.isNullOrBlank()) return errEnvelope("INVALID_ARGS", "input tap <x> <y>", args)
-        val r = ShizukuManager.runProcess(arrayOf("input", "tap", x, y))
+    /**
+     * P0 virtual display: find `-d <id>` / `--display <id>` anywhere in the
+     * input argv. OffloadArgs parses `--display <id>` as a value flag, but
+     * `-d <id>` becomes boolean-flag + positional, so scan the raw tokens.
+     */
+    private fun inputDisplayId(rest: List<String>): String? {
+        var i = 0
+        while (i < rest.size) {
+            val t = rest[i]
+            when {
+                t == "-d" -> { val v = rest.getOrNull(i + 1); if (v != null) { i++; return v } }
+                t.startsWith("--display=") -> return t.substringAfter("=")
+                t == "--display" -> { val v = rest.getOrNull(i + 1); if (v != null) { i++; return v } }
+            }
+            i++
+        }
+        return null
+    }
+
+    private fun inputTap(x: String?, y: String?, rest: List<String>, args: OffloadArgs): NativeOffloadResult {
+        if (x.isNullOrBlank() || y.isNullOrBlank()) return errEnvelope("INVALID_ARGS", "input tap <x> <y> [-d|--display N]", args)
+        val cmd = mutableListOf("input")
+        inputDisplayId(rest)?.let { cmd.addAll(listOf("-d", it)) }
+        cmd.addAll(listOf("tap", x, y))
+        val r = ShizukuManager.runProcess(cmd.toTypedArray())
         return if (r.exitCode == 0) okEnvelope(JSONObject().put("tap", "$x,$y"), args)
         else errEnvelope("OPERATION_FAILED", failMessage(r), args)
     }
 
-    private fun inputSwipe(coords: List<String>, args: OffloadArgs): NativeOffloadResult {
-        if (coords.size < 4) return errEnvelope("INVALID_ARGS", "input swipe <x1> <y1> <x2> <y2>", args)
-        val cmd = mutableListOf("input", "swipe", coords[0], coords[1], coords[2], coords[3])
+    private fun inputSwipe(coords: List<String>, rest: List<String>, args: OffloadArgs): NativeOffloadResult {
+        if (coords.size < 4) return errEnvelope("INVALID_ARGS", "input swipe <x1> <y1> <x2> <y2> [-d|--display N]", args)
+        val cmd = mutableListOf("input")
+        inputDisplayId(rest)?.let { cmd.addAll(listOf("-d", it)) }
+        cmd.addAll(listOf("swipe", coords[0], coords[1], coords[2], coords[3]))
         args.get("duration")?.let { cmd.add(it) }
         val r = ShizukuManager.runProcess(cmd.toTypedArray())
         return if (r.exitCode == 0) okEnvelope(JSONObject().put("swipe", coords.take(4)), args)
         else errEnvelope("OPERATION_FAILED", failMessage(r), args)
     }
 
-    private fun inputKey(key: String?, args: OffloadArgs): NativeOffloadResult {
-        if (key.isNullOrBlank()) return errEnvelope("INVALID_ARGS", "input key <keycode>", args)
-        val cmd = mutableListOf("input", "keyevent")
+    private fun inputKey(key: String?, rest: List<String>, args: OffloadArgs): NativeOffloadResult {
+        if (key.isNullOrBlank()) return errEnvelope("INVALID_ARGS", "input key <keycode> [-d|--display N]", args)
+        val cmd = mutableListOf("input")
+        inputDisplayId(rest)?.let { cmd.addAll(listOf("-d", it)) }
+        cmd.add("keyevent")
         if (args.hasFlag("long-press")) cmd.add("--longpress")
         cmd.add(key)
         val r = ShizukuManager.runProcess(cmd.toTypedArray())
@@ -697,11 +726,17 @@ class ShizukuOffloadHandler(private val context: Context) : NativeOffloadHandler
         else errEnvelope("OPERATION_FAILED", failMessage(r), args)
     }
 
-    private fun inputText(text: String, args: OffloadArgs): NativeOffloadResult {
-        if (text.isBlank()) return errEnvelope("INVALID_ARGS", "input text <text>", args)
+    private fun inputText(text: String, rest: List<String>, args: OffloadArgs): NativeOffloadResult {
+        if (text.isBlank()) return errEnvelope("INVALID_ARGS", "input text <text> [--display N]", args)
         // `input text` doesn't accept spaces directly — replace with %s
         val safe = text.replace(' ', '%').replace("'", "")
-        val r = ShizukuManager.runProcess(arrayOf("input", "text", safe))
+        val cmd = mutableListOf("input")
+        // text joins the positional args, so only the long `--display` form
+        // (a value flag, not positional) is safe here; `-d N` would leak N
+        // into the text itself.
+        args.get("display")?.let { cmd.addAll(listOf("-d", it)) }
+        cmd.addAll(listOf("text", safe))
+        val r = ShizukuManager.runProcess(cmd.toTypedArray())
         return if (r.exitCode == 0) okEnvelope(JSONObject().put("text", text), args)
         else errEnvelope("OPERATION_FAILED", failMessage(r), args)
     }
@@ -1144,7 +1179,11 @@ Usage:
 
 Usage:
   android-shizuku-cli activity start [-p pkg] [-c component] [-a action] [-d uri]
+                               [--user U] [--display N]
                                [--extra-string k=v;k=v] [--extra-int k=v]
+    --display N                P0 virtual display: launch on that display id
+                               (from `android-vd-cli create`); `am start`
+                               natively accepts `--display`.
   android-shizuku-cli activity force-stop <pkg>
   android-shizuku-cli activity kill <pkg>
   android-shizuku-cli activity broadcast <action> [--package pkg]
@@ -1190,10 +1229,15 @@ Usage:
         private const val INPUT_HELP = """input — input simulation.
 
 Usage:
-  android-shizuku-cli input tap <x> <y>
-  android-shizuku-cli input swipe <x1> <y1> <x2> <y2> [--duration MS]
-  android-shizuku-cli input key <KEYCODE> [--long-press]
-  android-shizuku-cli input text <text>
+  android-shizuku-cli input tap <x> <y> [-d|--display N]
+  android-shizuku-cli input swipe <x1> <y1> <x2> <y2> [--duration MS] [-d|--display N]
+  android-shizuku-cli input key <KEYCODE> [--long-press] [-d|--display N]
+  android-shizuku-cli input text <text> [--display N]
+
+  -d/--display N targets that display id (P0 virtual display from
+  `android-vd-cli create`), e.g. `input -d 7 tap 540 1200`.
+  `input text` only accepts the long `--display` form: its text is the
+  joined positional args, and a short `-d N` would leak N into the text.
 """
 
         private const val NOTIFICATION_HELP = """notification — system notifications.
