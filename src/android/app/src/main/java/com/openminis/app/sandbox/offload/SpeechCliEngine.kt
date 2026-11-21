@@ -211,7 +211,12 @@ internal object SpeechAudio {
 
         private fun emit(v: Short) {
             if (maxOut != null && outLen >= maxOut) return
-            if (outLen == out.size) out = out.copyOf(maxOf(out.size * 2, 1).let { if (maxOut != null) minOf(it, maxOut) else it })
+            if (outLen == out.size) {
+                var newSize = out.size * 2
+                if (newSize < 1) newSize = 1
+                if (maxOut != null) newSize = minOf(newSize, maxOut)
+                out = out.copyOf(newSize)
+            }
             out[outLen++] = v
         }
 
