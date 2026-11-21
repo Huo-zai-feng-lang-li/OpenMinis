@@ -82,19 +82,19 @@ jobs:
           ls -la dist/
 
 
-      - name: Publish release (in-app update protocol, tag 1.19)
+      - name: Publish release (in-app update protocol, tag 1.20)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           apk=$(find dist -name '*.apk' | head -1)
-          out="MinisApp-1.19-build50-arm64-v8a.apk"
+          out="MinisApp-1.20-build51-arm64-v8a.apk"
           cp "$apk" "$out"
-          if gh release view 1.19 >/dev/null 2>&1; then
-            gh release upload 1.19 "$out" --clobber
+          if gh release view 1.20 >/dev/null 2>&1; then
+            gh release upload 1.20 "$out" --clobber
           else
-            gh release create 1.19 \
-              --title "Minis 1.19 (build 50, capsule UX + agent-only virtual display)" \
-              --notes "Adds the Virtual Display permission card (android-vd-cli can now be auto-allowed in Settings → Permissions). Capsule live preview: default 3/4×2/5 screen, tap the frame to expand (4/5×3/5, moved up), draggable 1:1 with finger, 44dp tappable buttons. Virtual-display settings entry removed from the human menu (page stays for the agent / minis://settings/virtual_display). In-place update over 1.18 (build 49) with the shared CI test key." "$out"
+            gh release create 1.20 \
+              --title "Minis 1.20 (build 51, island-crash fix + capsule UX)" \
+              --notes "Fixes: (1) the agent foreground-service notification was crash-looping the app on cold start — the island card's ProgressBar.setIndeterminate(int) RemoteViews action doesn't exist on API 36; removed it (the layout's indeterminate flag already covers it) and wrapped the whole custom-view build in a crash-safe fallback to the default layout. Notifications/Dynamic Island now show again without killing the app. (2) Capsule live preview: default 3/4 x 2/5 screen, tap the frame to expand (4/5 x 3/5, moved up), drag now follows the finger 1:1 (horizontal was inverted), 44dp tappable buttons. (3) Virtual-display settings entry removed from the human menu (page stays for the agent / minis://settings/virtual_display); Virtual Display permission card in Settings -> Permissions. In-place update over 1.18 (build 49)." "$out"
           fi
 
       - uses: actions/upload-artifact@v4

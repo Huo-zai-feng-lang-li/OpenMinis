@@ -1484,53 +1484,62 @@ class AgentForegroundService : Service() {
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
 
         // [T-android-island-visual] Dark "island" card on top of the default
-        // layout: the same phase text is re-rendered inside a rounded dark
-        // card (custom RemoteViews) with a left icon tile, a brand-blue thin
-        // rounded progress bar and the Stop control as a small capsule.
-        // Visual layer only — no source of truth changes: title/subtitle are
-        // the same `titleText` / `collapsedText`, the bar shows the same
-        // indeterminate state (`isToolRunning`), and Stop posts the very
-        // same `stopPendingIntent`. ROMs that ignore custom notification
-        // views (e.g. MIUI's 超灵动岛 chrome, which draws the
-        // notification's own shell) fall back to the default layout; the
-        // accent below is the only knob that still reaches that path.
-        val islandViews = android.widget.RemoteViews(packageName, R.layout.notification_agent_island)
-        islandViews.setImageViewResource(R.id.notification_island_icon, smallIcon)
-        islandViews.setTextViewText(R.id.notification_island_title, titleText)
-        islandViews.setTextViewText(R.id.notification_island_subtitle, collapsedText)
-        if (isToolRunning) {
-            islandViews.setInt(R.id.notification_island_progress, "setVisibility", android.view.View.VISIBLE)
-            islandViews.setInt(R.id.notification_island_progress, "setIndeterminate", 1)
-        } else {
-            islandViews.setInt(R.id.notification_island_progress, "setVisibility", android.view.View.GONE)
-        }
-        if (isCompleted) {
-            islandViews.setInt(R.id.notification_island_stop, "setVisibility", android.view.View.GONE)
-        } else {
-            islandViews.setInt(R.id.notification_island_stop, "setVisibility", android.view.View.VISIBLE)
-            // The click-binding method was renamed between platform surfaces
-            // (setPendingIntent -> setOnClickPendingIntent in the API 36
-            // compile SDK). Resolve both so the capsule works on older
-            // devices too; neither existing is a no-op (the default-layout
-            // Stop action below remains as the fallback either way).
-            runCatching {
-                islandViews.javaClass.getMethod(
-                    "setOnClickPendingIntent",
-                    Int::class.javaPrimitiveType,
-                    android.app.PendingIntent::class.java,
-                ).invoke(islandViews, R.id.notification_island_stop, stopPendingIntent)
-            }.getOrElse {
+        // layout: the same phase text re-rendered inside a rounded dark card
+        // (custom RemoteViews) with a left icon tile, a brand-blue thin
+        // indeterminate progress bar and the Stop control as a capsule.
+        // Visual layer only — no source-of-truth changes.
+        //
+        // Built crash-safe: on ANY ROM that cannot inflate/bind this layout we
+        // fall back to the default notification layout (the Builder still
+        // carries title/text/progress/actions), so a custom-view problem can
+        // never take the foreground service down with it. ROMs that ignore
+        // custom views (e.g. MIUI's 超灵动岛 chrome, which draws the
+        // notification's own shell) use the default row, tinted by setColor.
+        // NOTE: the old `setInt(progress, "setIndeterminate", 1)` was removed —
+        // the layout's `android:indeterminate="true"` already makes the bar
+        // indeterminate, and that call threw ActionException on API 36
+        // (no `ProgressBar.setIndeterminate(int)`), which crash-looped the app
+        // as a BadForegroundServiceNotificationException.
+        runCatching {
+            val islandViews = android.widget.RemoteViews(packageName, R.layout.notification_agent_island)
+            islandViews.setImageViewResource(R.id.notification_island_icon, smallIcon)
+            islandViews.setTextViewText(R.id.notification_island_title, titleText)
+            islandViews.setTextViewText(R.id.notification_island_subtitle, collapsedText)
+            if (isToolRunning) {
+                islandViews.setInt(R.id.notification_island_progress, "setVisibility", android.view.View.VISIBLE)
+            } else {
+                islandViews.setInt(R.id.notification_island_progress, "setVisibility", android.view.View.GONE)
+            }
+            if (isCompleted) {
+                islandViews.setInt(R.id.notification_island_stop, "setVisibility", android.view.View.GONE)
+            } else {
+                islandViews.setInt(R.id.notification_island_stop, "setVisibility", android.view.View.VISIBLE)
+                // The click-binding method was renamed between platform
+                // surfaces (setPendingIntent -> setOnClickPendingIntent on the
+                // API 36 compile SDK); resolve both so the capsule click binds
+                // on old and new ROMs. If neither resolves, the default-layout
+                // Stop action below is the fallback.
                 runCatching {
                     islandViews.javaClass.getMethod(
-                        "setPendingIntent",
+                        "setOnClickPendingIntent",
                         Int::class.javaPrimitiveType,
                         android.app.PendingIntent::class.java,
                     ).invoke(islandViews, R.id.notification_island_stop, stopPendingIntent)
+                }.getOrElse {
+                    runCatching {
+                        islandViews.javaClass.getMethod(
+                            "setPendingIntent",
+                            Int::class.javaPrimitiveType,
+                            android.app.PendingIntent::class.java,
+                        ).invoke(islandViews, R.id.notification_island_stop, stopPendingIntent)
+                    }
                 }
             }
+            builder.setCustomContentView(islandViews)
+            builder.setCustomBigContentView(islandViews)
+        }.onFailure {
+            com.openminis.app.logging.AppLogger.warning(TAG, "island custom view unavailable, using default layout: ${it.message}")
         }
-        builder.setCustomContentView(islandViews)
-        builder.setCustomBigContentView(islandViews)
         // Brand blue (#78C8FF, the overlay ring's accent) tints the small
         // icon and the default-layout progress bar.
         builder.setColor(0xE678C8FF.toInt())

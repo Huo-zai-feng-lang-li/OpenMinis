@@ -37,11 +37,11 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.unit.toDp
 import com.openminis.app.R
 import com.openminis.app.accessibility.MinisAccessibilityService
 import com.openminis.app.display.MinisAgentDisplayManager
@@ -295,15 +295,17 @@ fun CapsuleContent(displayId: Int) {
     val stale = lastFrameAt != null && nowNanos - lastFrameAt > STALE_AFTER_NANOS
 
     // Card size: default 3/4 of screen width × 2/5 of screen height,
-    // expanded 4/5 × 3/5 (bigger + higher). Falls back to 1080×2520.
+    // expanded 4/5 × 3/5 (bigger + higher). Falls back to 1080×2520 px.
+    // [area] is in pixels; divide by the display density (px-per-dp) so the
+    // card is a fixed fraction of the physical screen, then express as Dp.
     val area = remember { MinisCapsule.currentArea() }
-    val density = LocalDensity.current
-    val cardW = with(density) { ((area?.width ?: 1080) * if (expanded) 0.8f else 0.75f).toInt().toDp() }
-    val cardH = with(density) { ((area?.height ?: 2520) * if (expanded) 0.6f else 0.4f).toInt().toDp() }
+    val pxPerDp = LocalDensity.current.density
+    val cardW = ((area?.width ?: 1080) * (if (expanded) 0.8f else 0.75f)) / pxPerDp
+    val cardH = ((area?.height ?: 2520) * (if (expanded) 0.6f else 0.4f)) / pxPerDp
 
     Column(
         modifier = Modifier
-            .size(cardW, cardH)
+            .size(cardW.dp, cardH.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(Color(0xE61B1B1B))
             .padding(8.dp),
