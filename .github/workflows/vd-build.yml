@@ -7,6 +7,14 @@ on:
 
 env:
   ANDROID_HOME: ${{ github.workspace }}/.android-sdk
+  # Fork-only CI test key (committed): runner-generated debug keystores are
+  # unique per runner, so consecutive builds sign differently and `pm install -r`
+  # over the installed .vd app fails with INSTALL_FAILED_UPDATE_INCOMPATIBLE.
+  # One shared key makes every .vd debug build update in place.
+  MINIS_CI_KEYSTORE: ${{ github.workspace }}/ci-keys/vd-test.keystore
+  MINIS_CI_KEYSTORE_PASS: minis-vd-test
+  MINIS_CI_KEY_ALIAS: minis-vd-test
+  MINIS_CI_KEYPASS: minis-vd-test
 
 jobs:
   apk:
@@ -44,6 +52,21 @@ jobs:
           mkdir -p src/android/app/libs
           cp deps/build/rclone/rclone.aar src/android/app/libs/
 
+      - name: PRoot (libproot.so + proot asset)
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.1.12297006
+        run: |
+          # RootfsManager expects libproot.so in the APK's lib/<abi>/ (extracted
+          # to nativeLibraryDir at install). It is a build artifact, not a
+          # tracked file — without this step the APK ships only the loaders
+          # and PRoot dies with "PRoot binary not found" → every shell
+          # command fails, virtual display can't run its CLI.
+          rm -rf deps/proot
+          git clone --depth 1 https://github.com/OpenMinis/proot deps/proot
+          bash deps/build_proot.sh
+          ls -la src/android/app/src/main/jniLibs/arm64-v8a/
+          ls -la src/android/app/src/main/assets/proot-aarch64
+
       - name: Gradle build
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.1.12297006
@@ -59,19 +82,19 @@ jobs:
           ls -la dist/
 
 
-      - name: Publish release (in-app update protocol, tag 1.16)
+      - name: Publish release (in-app update protocol, tag 1.17)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           apk=$(find dist -name '*.apk' | head -1)
-          out="MinisApp-1.16-build47-arm64-v8a.apk"
+          out="MinisApp-1.17-build48-arm64-v8a.apk"
           cp "$apk" "$out"
-          if gh release view 1.16 >/dev/null 2>&1; then
-            gh release upload 1.16 "$out" --clobber
+          if gh release view 1.17 >/dev/null 2>&1; then
+            gh release upload 1.17 "$out" --clobber
           else
-            gh release create 1.16 \
-              --title "Minis 1.16 (build 47, full-feature)" \
-              --notes "Rolling full-feature build: in-process virtual display + M1 Shizuku shell-host fallback + live capsule preview + system rules (ON by default, execution rules preset) + dark dynamic-island notification + sandbox rootfs assets. Stable-channel in-app 'check update' picks this up (1.16 > installed 1.15, build 47 > 37)." "$out"
+            gh release create 1.17 \
+              --title "Minis 1.17 (build 48, PRoot + rules UI fixes)" \
+              --notes "Fixes: PRoot now ships libproot.so (sandbox shells + virtual display work); system-rules model-group switches toggle again. Signed with the shared CI test key (ci-keys/vd-test.keystore) so in-place .vd updates keep working. Stable-channel 'check update' offers this over 1.16 (build 47)." "$out"
           fi
 
       - uses: actions/upload-artifact@v4

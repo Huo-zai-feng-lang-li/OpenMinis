@@ -65,8 +65,11 @@ fun SystemRulesScreen(
     // writing on every keystroke).
     var enabled by remember { mutableStateOf(SystemRulesStore.isEnabled(appContext)) }
     var groupScoped by remember { mutableStateOf(SystemRulesStore.isGroupScoped(appContext)) }
+    // Immutable set + whole-replacement on toggle: an in-place MutableSet
+    // mutation (`scopedIds += id`) is NOT a snapshot write, so it never
+    // invalidates the switch's composition — the toggle rendered stuck.
     var scopedIds by remember {
-        mutableStateOf<MutableSet<String>>(SystemRulesStore.scopedGroupIds(appContext).toMutableSet())
+        mutableStateOf<Set<String>>(SystemRulesStore.scopedGroupIds(appContext))
     }
     var saved by remember { mutableStateOf(false) }
 
@@ -137,7 +140,9 @@ fun SystemRulesScreen(
                             title = group.name,
                             checked = group.id in scopedIds,
                             onCheckedChange = { on ->
-                                if (on) scopedIds += group.id else scopedIds -= group.id
+                                // Replace the whole set (a snapshot write); do NOT
+                                // mutate an underlying collection in place.
+                                scopedIds = if (on) scopedIds + group.id else scopedIds - group.id
                                 saved = false
                             },
                             showDivider = index < groups.lastIndex,

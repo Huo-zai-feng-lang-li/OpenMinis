@@ -163,3 +163,7 @@ src/android/app/libs/rclone.aar
 deps/aot/*.S
 deps/aot/.build/
 deps/aot/.build-iphonesimulator/
+
+# CI test signing key: committed on purpose (fork-only) so every CI .vd
+# build shares one identity and updates in place.
+!/ci-keys/vd-test.keystore

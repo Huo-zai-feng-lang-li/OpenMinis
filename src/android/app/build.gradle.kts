@@ -36,8 +36,8 @@ android {
         applicationId = "com.openminis.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 47
-        versionName = "1.16"
+        versionCode = 48
+        versionName = "1.17"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -82,6 +82,25 @@ android {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
             version = "3.22.1"
+        }
+    }
+
+    signingConfigs {
+        getByName("debug") {
+            // CI-stable test key (fork-only): when MINIS_CI_KEYSTORE is set,
+            // sign with the committed ci-keys/vd-test.keystore so every CI
+            // build keeps one identity and the installed .vd app updates in
+            // place (a runner-generated keystore changes per runner and
+            // breaks `pm install -r`). Local builds stay on the default
+            // per-machine debug keystore.
+            val ciKey = System.getenv("MINIS_CI_KEYSTORE")
+            if (!ciKey.isNullOrBlank() && File(ciKey).exists()) {
+                storeFile = File(ciKey)
+                storeType = "PKCS12"
+                storePassword = System.getenv("MINIS_CI_KEYSTORE_PASS")
+                keyAlias = System.getenv("MINIS_CI_KEY_ALIAS")
+                keyPassword = System.getenv("MINIS_CI_KEYPASS")
+            }
         }
     }
 
