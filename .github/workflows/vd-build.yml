@@ -82,19 +82,19 @@ jobs:
           ls -la dist/
 
 
-      - name: Publish release (in-app update protocol, tag 1.17)
+      - name: Publish release (in-app update protocol, tag 1.18)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           apk=$(find dist -name '*.apk' | head -1)
-          out="MinisApp-1.17-build48-arm64-v8a.apk"
+          out="MinisApp-1.18-build49-arm64-v8a.apk"
           cp "$apk" "$out"
-          if gh release view 1.17 >/dev/null 2>&1; then
-            gh release upload 1.17 "$out" --clobber
+          if gh release view 1.18 >/dev/null 2>&1; then
+            gh release upload 1.18 "$out" --clobber
           else
-            gh release create 1.17 \
-              --title "Minis 1.17 (build 48, PRoot + rules UI fixes)" \
-              --notes "Fixes: PRoot now ships libproot.so (sandbox shells + virtual display work); system-rules model-group switches toggle again. Signed with the shared CI test key (ci-keys/vd-test.keystore) so in-place .vd updates keep working. Stable-channel 'check update' offers this over 1.16 (build 47)." "$out"
+            gh release create 1.18 \
+              --title "Minis 1.18 (build 49, virtual-display permission card)" \
+              --notes "Adds the Virtual Display card to Settings → Permissions so the agent's android-vd-cli (virtual display create/list/release/screenshot) can be auto-allowed in the UI. In-place update over 1.17 (build 48) with the shared CI test key." "$out"
           fi
 
       - uses: actions/upload-artifact@v4

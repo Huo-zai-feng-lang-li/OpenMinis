@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Accessibility
+import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenuItem
@@ -213,6 +214,24 @@ fun OffloadPermissionScreen(
             onSystemAction = onOpenPrivilegedBackend,
             // The status row itself opens the same page so users can revisit
             // the setup walkthrough even after the manager is already ready.
+            onStatusRowClick = onOpenPrivilegedBackend,
+        )
+
+        // [T-android-vd-perm-card] Third integration card: the virtual display
+        // CLI. P0 in-process creation needs no system grant; the M1 Shizuku
+        // host fallback rides on the Privileged Backend above, so this row's
+        // status tracks Shizuku readiness and opens the same setup page.
+        IntegrationSection(
+            iconVector = Icons.Outlined.Devices,
+            iconTint = Color(0xFF78C8FF),
+            sectionHeaderRes = R.string.perm_section_vd,
+            sectionFooterRes = R.string.perm_vd_section_footer,
+            toolName = "display_cli",
+            descriptionRes = R.string.perm_vd_cli_description,
+            systemReady = ShizukuManager.isReady(),
+            systemStatusTitleRes = shizukuSubtitleRes(shizukuSnap.state),
+            systemActionTitleRes = shizukuActionTitleRes(shizukuSnap.state),
+            onSystemAction = onOpenPrivilegedBackend,
             onStatusRowClick = onOpenPrivilegedBackend,
         )
 
@@ -458,6 +477,7 @@ private fun toolTitleRes(toolName: String): Int = when (toolName) {
     "photos" -> R.string.perm_tool_photos
     "a11y_cli" -> R.string.perm_tool_a11y_cli
     "shizuku_cli" -> R.string.perm_tool_shizuku_cli
+    "display_cli" -> R.string.perm_tool_display_cli
     else -> 0
 }
 
