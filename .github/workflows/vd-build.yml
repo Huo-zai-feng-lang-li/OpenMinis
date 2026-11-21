@@ -59,7 +59,7 @@ jobs:
           ls -la dist/
 
 
-      - name: Publish release (in-app update protocol: tag 1.15, MinisApp-<ver>-build<N>-<abi>.apk)
+      - name: Publish release (in-app update protocol, tag 1.15)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
