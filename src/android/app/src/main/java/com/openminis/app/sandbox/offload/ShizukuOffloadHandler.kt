@@ -1268,12 +1268,3 @@ Usage:
 """
     }
 }
-e — device state.
-
-Usage:
-  android-shizuku-cli device info
-  android-shizuku-cli device battery
-  android-shizuku-cli device usage [--package pkg] [--top N]
-"""
-    }
-}

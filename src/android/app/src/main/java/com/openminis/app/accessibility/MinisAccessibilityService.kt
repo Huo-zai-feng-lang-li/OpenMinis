@@ -209,7 +209,7 @@ class MinisAccessibilityService : AccessibilityService() {
         val out = ArrayList<Map<String, Any?>>()
         try {
             for (w in windows ?: emptyList()) {
-                out.add(mapOf(
+                val m = mutableMapOf<String, Any?>(
                     "windowId" to w.id,
                     "type" to when (w.type) {
                         android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION -> "application"
