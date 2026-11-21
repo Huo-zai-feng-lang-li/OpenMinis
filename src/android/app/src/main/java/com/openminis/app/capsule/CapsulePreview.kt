@@ -107,6 +107,7 @@ object MinisCapsule {
     private var host: VdOverlayHost? = null
     private var hostService: MinisAccessibilityService? = null
     private var capsuleWindow: VdOverlayWindow? = null
+    private var capsulePlacement: OverlayPlacement? = null
     private var managed = false
 
     private val onDisplayChanged: () -> Unit = { refresh() }
@@ -185,21 +186,18 @@ object MinisCapsule {
         val window = host.open(placement, onOutside = null) {
             CapsuleContent(displayId)
         } ?: return
+        capsulePlacement = placement
         // The whole card is the drag handle; a tap still reaches the frame
-        // (drag only after the touch slop). The window follows the finger:
-        // screen coords map to gravity-relative offsets.
+        // (drag only after the touch slop). The window follows the finger 1:1:
+        // gravity is BOTTOM|END, so the x offset is measured from the RIGHT
+        // edge and the y offset from the BOTTOM edge — a rightward/downward
+        // finger delta DECREASES both offsets (the old code added dx, which
+        // made horizontal drags fly the other way).
         window.draggable(object : OverlayDrag {
-            private var gx = placement.gravity
-            private var ox = placement.x
-            private var oy = placement.y
-
             override fun start() {}
 
             override fun move(dx: Float, dy: Float) {
-                // Keep it simple: drag from the default corner, clamp roughly to the screen.
-                ox = (ox + dx).toInt()
-                oy = (oy - dy).toInt()
-                window.place(OverlayPlacement(gx, ox, oy))
+                moveCapsule(dx, dy)
             }
 
             override fun end(dx: Float, dy: Float) {}
@@ -208,9 +206,29 @@ object MinisCapsule {
         AppLogger.info(TAG, "capsule mounted on display $displayId")
     }
 
+    /**
+     * Move the capsule window by screen-relative deltas ([dx] + = right,
+     * [dy] + = down), clamped to the screen. Offsets live in
+     * [capsulePlacement] so drags accumulate correctly against the
+     * BOTTOM|END anchor.
+     */
+    private fun moveCapsule(dx: Float, dy: Float) {
+        val w = capsuleWindow ?: return
+        val p = capsulePlacement ?: return
+        val a = host?.area() ?: return
+        val nx = (p.x - dx).toInt().coerceIn(0, maxOf(0, a.width - w.width))
+        val ny = (p.y - dy).toInt().coerceIn(0, maxOf(0, a.height - w.height))
+        capsulePlacement = OverlayPlacement(p.gravity, nx, ny)
+        w.place(capsulePlacement)
+    }
+
+    /** Screen metrics for sizing the capsule content (null when no host yet). */
+    fun currentArea(): OverlayArea? = host?.area()
+
     private fun closeWindows() {
         capsuleWindow?.close()
         capsuleWindow = null
+        capsulePlacement = null
         VdAgentPip.close()
     }
 
@@ -241,6 +259,9 @@ fun CapsuleContent(displayId: Int) {
     var frame: Bitmap? by remember { mutableStateOf(null) }
     var paused by remember { mutableStateOf(false) }
     var tick by remember { mutableStateOf(0L) }
+    // Tapping the frame toggles the expanded (bigger, moved up) state; the
+    // window is BOTTOM|END-anchored so it grows up + to the left.
+    var expanded by remember { mutableStateOf(false) }
 
     // Stream: the display's preview frames (≤10 fps upstream, short side
     // ≤360px) throttled to ≤PREVIEW_FPS and deduped; cancel when paused.
@@ -271,8 +292,15 @@ fun CapsuleContent(displayId: Int) {
     val nowNanos = remember(displayId, tick) { SystemClock.elapsedRealtimeNanos() }
     val stale = lastFrameAt != null && nowNanos - lastFrameAt > STALE_AFTER_NANOS
 
+    // Card size in px: default 3/4 of screen width × 2/5 of screen height,
+    // expanded 4/5 × 3/5 (bigger + higher). Falls back to 1080×2520.
+    val area = remember { MinisCapsule.currentArea() }
+    val cardW = ((area?.width ?: 1080) * if (expanded) 0.8f else 0.75f).toInt()
+    val cardH = ((area?.height ?: 2520) * if (expanded) 0.6f else 0.4f).toInt()
+
     Column(
         modifier = Modifier
+            .size(cardW, cardH)
             .clip(RoundedCornerShape(16.dp))
             .background(Color(0xE61B1B1B))
             .padding(8.dp),
@@ -301,10 +329,10 @@ fun CapsuleContent(displayId: Int) {
         Box(
             modifier = Modifier
                 .padding(top = 4.dp)
-                .size(120.dp, 250.dp)
+                .weight(1f)
                 .clip(RoundedCornerShape(12.dp))
                 .background(Color(0xFF000000))
-                .clickable { MinisCapsule.expandPip(displayId) },
+                .clickable { expanded = !expanded },
             contentAlignment = Alignment.Center,
         ) {
             val f = frame
@@ -340,12 +368,22 @@ private fun CapsuleButton(
     label: String,
     onClick: () -> Unit,
 ) {
-    Icon(
-        imageVector = icon,
-        contentDescription = label,
-        tint = Color(0xBBFFFFFF),
-        modifier = Modifier.size(22.dp).clickable(onClick = onClick).padding(2.dp),
-    )
+    // 44dp target (Material min) with a 22dp glyph centered, so the row of
+    // buttons is actually tappable (the old 22dp+2dp pad was ~26dp and
+    // nearly impossible to hit on the small card).
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = Color(0xBBFFFFFF),
+            modifier = Modifier.size(22.dp),
+        )
+    }
 }
 
 private const val STALE_AFTER_NANOS = 3_000_000_000L // 3s

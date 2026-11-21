@@ -277,19 +277,11 @@ fun SettingsScreen(
                 )
             }
 
-            // [T-android-virtual-display] Android-only agent-display surface:
-            // invisible virtual displays with a floating capsule live
-            // preview. Below the Agent Runtime section, above Storage.
-            SettingsSection(title = stringResource(R.string.vd_settings_title)) {
-                SettingsItem(
-                    icon = Icons.Outlined.Devices,
-                    iconColor = Color(0xFFAF52DE),
-                    title = stringResource(R.string.vd_settings_title),
-                    subtitle = stringResource(R.string.vd_settings_desc),
-                    onClick = onVirtualDisplayClick,
-                    showDivider = false,
-                )
-            }
+            // [T-android-virtual-display] Agent-only surface (invisible virtual
+            // displays + capsule preview): the settings entry was removed —
+            // the page still exists at Routes.VIRTUAL_DISPLAY for the agent /
+            // minis://settings/virtual_display deep link, just not in the
+            // human menu (users don't type package names by hand).
 
             // -- Storage --
             SettingsSection(title = stringResource(R.string.settings_section_storage)) {

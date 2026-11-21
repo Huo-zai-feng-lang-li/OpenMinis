@@ -82,19 +82,19 @@ jobs:
           ls -la dist/
 
 
-      - name: Publish release (in-app update protocol, tag 1.18)
+      - name: Publish release (in-app update protocol, tag 1.19)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           apk=$(find dist -name '*.apk' | head -1)
-          out="MinisApp-1.18-build49-arm64-v8a.apk"
+          out="MinisApp-1.19-build50-arm64-v8a.apk"
           cp "$apk" "$out"
-          if gh release view 1.18 >/dev/null 2>&1; then
-            gh release upload 1.18 "$out" --clobber
+          if gh release view 1.19 >/dev/null 2>&1; then
+            gh release upload 1.19 "$out" --clobber
           else
-            gh release create 1.18 \
-              --title "Minis 1.18 (build 49, virtual-display permission card)" \
-              --notes "Adds the Virtual Display card to Settings → Permissions so the agent's android-vd-cli (virtual display create/list/release/screenshot) can be auto-allowed in the UI. In-place update over 1.17 (build 48) with the shared CI test key." "$out"
+            gh release create 1.19 \
+              --title "Minis 1.19 (build 50, capsule UX + agent-only virtual display)" \
+              --notes "Adds the Virtual Display permission card (android-vd-cli can now be auto-allowed in Settings → Permissions). Capsule live preview: default 3/4×2/5 screen, tap the frame to expand (4/5×3/5, moved up), draggable 1:1 with finger, 44dp tappable buttons. Virtual-display settings entry removed from the human menu (page stays for the agent / minis://settings/virtual_display). In-place update over 1.18 (build 49) with the shared CI test key." "$out"
           fi
 
       - uses: actions/upload-artifact@v4
