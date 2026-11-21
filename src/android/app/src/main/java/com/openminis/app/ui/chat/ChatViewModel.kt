@@ -16500,9 +16500,29 @@ Scheduled tasks: crontab / at / nohup loops will stop when the app is suspended,
                 "globalChars=${globalMemoryFragment?.length ?: 0} " +
                 "dailyChars=${dailyMemoryFragment?.length ?: 0}",
         )
+        // [T-system-rules] Highest-priority standing instructions
+        // (filesDir/minis-global/system-rules.md, Settings → System Rules),
+        // meant to keep the model from soft-refusing or hedging with
+        // boilerplate disclaimers. Placed AFTER the base system
+        // instructions and BEFORE the user-injected fragments (skills /
+        // MCP / global memory / daily memory) — the strongest position in
+        // the prompt. Empty file = off (null). Optionally scoped to a set
+        // of model groups; the effective group is the session-bound group,
+        // falling back to the app's default primary group when the session
+        // is bound to a direct model entry or has no binding yet. The
+        // prompt is rebuilt on every send, so a Settings save applies from
+        // the very next turn.
+        val systemRulesFragment = com.openminis.app.data.SystemRulesStore.loadFragment(
+            context,
+            effectiveGroupId = _selectedGroupId.value ?: providerRepository.defaultPrimaryGroupId,
+        )
 
         return buildString {
             append(base)
+            if (systemRulesFragment != null) {
+                append("\n\n")
+                append(systemRulesFragment)
+            }
             if (skillFragment != null) {
                 append("\n\n")
                 append(skillFragment)

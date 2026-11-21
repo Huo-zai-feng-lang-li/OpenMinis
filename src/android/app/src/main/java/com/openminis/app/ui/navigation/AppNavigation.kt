@@ -183,6 +183,8 @@ object Routes {
     const val MCP = "mcp"
     /** [T-soul-md] SOUL.md editor. */
     const val SOUL = "soul"
+    /** [T-system-rules] System Rules editor (highest-priority standing instructions). */
+    const val SYSTEM_RULES = "system_rules"
     const val MEMORY_FILE_EDIT = "memory_file/{fileName}/{isGlobal}"
     const val PERMISSIONS = "permissions"
     /**
@@ -658,6 +660,7 @@ fun AppNavigation(
                 onSkillsClick = { navController.safeNavigate(Routes.SKILLS) },
                 onTerminalClick = { navController.safeNavigate(Routes.terminal()) },
                 onMemoryClick = { navController.safeNavigate(Routes.MEMORY) },
+                onSystemRulesClick = { navController.safeNavigate(Routes.SYSTEM_RULES) },
                 onAgentsClick = { navController.safeNavigate(Routes.AGENTS) },
                 onAgentToolsClick = { navController.safeNavigate(Routes.AGENT_TOOLS) },
                 onMcpClick = { navController.safeNavigate(Routes.MCP) },
@@ -1431,6 +1434,16 @@ fun AppNavigation(
         // [T-soul-md] SOUL.md editor.
         composable(Routes.SOUL) {
             com.openminis.app.ui.settings.SoulSettingsScreen(
+                onBack = { navController.safePopBackStack() },
+            )
+        }
+
+        // [T-system-rules] System Rules editor — the highest-priority
+        // standing-instructions file (filesDir/minis-global/system-rules.md),
+        // reachable from Settings › Agent Runtime › System Rules.
+        composable(Routes.SYSTEM_RULES) {
+            com.openminis.app.ui.settings.SystemRulesScreen(
+                providerRepository = providerRepository,
                 onBack = { navController.safePopBackStack() },
             )
         }
