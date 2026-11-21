@@ -41,6 +41,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.toDp
 import com.openminis.app.R
 import com.openminis.app.accessibility.MinisAccessibilityService
 import com.openminis.app.display.MinisAgentDisplayManager
@@ -218,8 +219,9 @@ object MinisCapsule {
         val a = host?.area() ?: return
         val nx = (p.x - dx).toInt().coerceIn(0, maxOf(0, a.width - w.width))
         val ny = (p.y - dy).toInt().coerceIn(0, maxOf(0, a.height - w.height))
-        capsulePlacement = OverlayPlacement(p.gravity, nx, ny)
-        w.place(capsulePlacement)
+        val np = OverlayPlacement(p.gravity, nx, ny)
+        capsulePlacement = np
+        w.place(np)
     }
 
     /** Screen metrics for sizing the capsule content (null when no host yet). */
@@ -292,11 +294,12 @@ fun CapsuleContent(displayId: Int) {
     val nowNanos = remember(displayId, tick) { SystemClock.elapsedRealtimeNanos() }
     val stale = lastFrameAt != null && nowNanos - lastFrameAt > STALE_AFTER_NANOS
 
-    // Card size in px: default 3/4 of screen width × 2/5 of screen height,
+    // Card size: default 3/4 of screen width × 2/5 of screen height,
     // expanded 4/5 × 3/5 (bigger + higher). Falls back to 1080×2520.
     val area = remember { MinisCapsule.currentArea() }
-    val cardW = ((area?.width ?: 1080) * if (expanded) 0.8f else 0.75f).toInt()
-    val cardH = ((area?.height ?: 2520) * if (expanded) 0.6f else 0.4f).toInt()
+    val density = LocalDensity.current
+    val cardW = with(density) { ((area?.width ?: 1080) * if (expanded) 0.8f else 0.75f).toInt().toDp() }
+    val cardH = with(density) { ((area?.height ?: 2520) * if (expanded) 0.6f else 0.4f).toInt().toDp() }
 
     Column(
         modifier = Modifier
@@ -387,3 +390,4 @@ private fun CapsuleButton(
 }
 
 private const val STALE_AFTER_NANOS = 3_000_000_000L // 3s
+l STALE_AFTER_NANOS = 3_000_000_000L // 3s
