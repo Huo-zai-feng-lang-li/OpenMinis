@@ -1133,7 +1133,7 @@ class AgentForegroundService : Service() {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 getString(R.string.bg_service_channel_name),
-                NotificationManager.IMPORTANCE_LOW,
+                NotificationManager.IMPORTANCE_HIGH,
             ).apply {
                 description = getString(R.string.bg_service_channel_description)
                 setShowBadge(false)
@@ -1336,7 +1336,11 @@ class AgentForegroundService : Service() {
         val soulName = SoulStore.cachedMetadata.value.name.ifBlank { SoulMetadata.DEFAULT.name }
         val titleText = when (phase) {
             AgentPhase.COMPLETED -> getString(R.string.bg_service_notification_title_completed)
-            AgentPhase.TOOL -> toolRowTitle(toolName!!, toolTitle)
+            // [T-island-clean-title] The island title is the short soul/app
+            // name (like Pinduoduo/Didi: title = who, detail = subtitle). The
+            // technical tool task title used to be shown here and made the
+            // promoted chip read like a log line.
+            AgentPhase.TOOL -> soulName
             AgentPhase.THINKING, AgentPhase.GENERATING -> soulName
             AgentPhase.IDLE -> getString(R.string.bg_service_notification_title)
             // iOS's waiting card is titled with the conversation.

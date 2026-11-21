@@ -87,19 +87,19 @@ jobs:
           ls -la dist/
 
 
-      - name: Publish release (in-app update protocol, tag 1.21)
+      - name: Publish release (in-app update protocol, tag 1.22)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           apk=$(find dist -name '*.apk' | head -1)
-          out="MinisApp-1.21-build52-arm64-v8a.apk"
+          out="MinisApp-1.22-build53-arm64-v8a.apk"
           cp "$apk" "$out"
-          if gh release view 1.21 >/dev/null 2>&1; then
-            gh release upload 1.21 "$out" --clobber
+          if gh release view 1.22 >/dev/null 2>&1; then
+            gh release upload 1.22 "$out" --clobber
           else
-            gh release create 1.21 \
-              --title "Minis 1.21 (build 52, AOT-fast perf build)" \
-              --notes "Now ships the `perf` variant (debug minus android:debuggable): ART AOT-compiles it instead of running it interpreter+JIT, so keyboard/IME pop and UI transitions are as snappy as the release main app. Same .vd package id + CI signing key (in-place update over 1.20 build 51); DEV_TOOLS kept. Includes the 1.20 island-crash fix + capsule UX." "$out"
+            gh release create 1.22 \
+              --title "Minis 1.22 (build 53, clean island notification)" \
+              --notes "Notification/dynamic-island cleanup modeled on Pinduoduo/Didi: the promoted chip now titles with the short soul/app name (the technical tool task title moved out of the title; tool detail stays in the subtitle) and the agent_status channel moves to IMPORTANCE_HIGH so MIUI features it on the island. Perf (non-debuggable/AOT) build: keyboard and UI stay snappy. In-place update over 1.21 (build 52)." "$out"
           fi
 
       - uses: actions/upload-artifact@v4
