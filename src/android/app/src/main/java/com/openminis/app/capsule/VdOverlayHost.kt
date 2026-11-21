@@ -368,7 +368,7 @@ internal class VdOverlayOwners : LifecycleOwner, SavedStateRegistryOwner, ViewMo
     private val registry = LifecycleRegistry(this)
     private val saved = SavedStateRegistryController.create(this)
     override val lifecycle: Lifecycle get() = registry
-    override val savedStateRegistry: SavedStateRegistry get() = saved
+    override val savedStateRegistry: SavedStateRegistry get() = saved.registry
     override val viewModelStore = ViewModelStore()
 
     fun start() {

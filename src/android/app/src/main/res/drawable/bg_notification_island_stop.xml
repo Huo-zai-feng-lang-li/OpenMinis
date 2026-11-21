@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- T-android-island-visual: small rounded-capsule background for the Stop control. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/notification_island_stop_bg" />
+    <corners android:radius="@dimen/notification_island_stop_corner" />
+</shape>

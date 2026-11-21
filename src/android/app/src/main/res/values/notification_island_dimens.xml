@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- T-android-island-visual: geometry for the custom FGS notification card. -->
+<resources>
+    <!-- The "island" corner radius. -->
+    <dimen name="notification_island_corner">30dp</dimen>
+    <dimen name="notification_island_icon_size">40dp</dimen>
+    <dimen name="notification_island_icon_corner">12dp</dimen>
+    <dimen name="notification_island_progress_height">3dp</dimen>
+    <dimen name="notification_island_progress_corner">1.5dp</dimen>
+    <dimen name="notification_island_stop_corner">16dp</dimen>
+</resources>

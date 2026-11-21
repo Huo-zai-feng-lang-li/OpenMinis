@@ -1483,6 +1483,39 @@ class AgentForegroundService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
 
+        // [T-android-island-visual] Dark "island" card on top of the default
+        // layout: the same phase text is re-rendered inside a rounded dark
+        // card (custom RemoteViews) with a left icon tile, a brand-blue thin
+        // rounded progress bar and the Stop control as a small capsule.
+        // Visual layer only — no source of truth changes: title/subtitle are
+        // the same `titleText` / `collapsedText`, the bar shows the same
+        // indeterminate state (`isToolRunning`), and Stop posts the very
+        // same `stopPendingIntent`. ROMs that ignore custom notification
+        // views (e.g. MIUI's 超灵动岛 chrome, which draws the
+        // notification's own shell) fall back to the default layout; the
+        // accent below is the only knob that still reaches that path.
+        val islandViews = android.app.RemoteViews(packageName, R.layout.notification_agent_island)
+        islandViews.setImageViewResource(R.id.notification_island_icon, smallIcon)
+        islandViews.setTextViewText(R.id.notification_island_title, titleText)
+        islandViews.setTextViewText(R.id.notification_island_subtitle, collapsedText)
+        if (isToolRunning) {
+            islandViews.setInt(R.id.notification_island_progress, "setVisibility", android.view.View.VISIBLE)
+            islandViews.setInt(R.id.notification_island_progress, "setIndeterminate", 1)
+        } else {
+            islandViews.setInt(R.id.notification_island_progress, "setVisibility", android.view.View.GONE)
+        }
+        if (isCompleted) {
+            islandViews.setInt(R.id.notification_island_stop, "setVisibility", android.view.View.GONE)
+        } else {
+            islandViews.setInt(R.id.notification_island_stop, "setVisibility", android.view.View.VISIBLE)
+            islandViews.setPendingIntent(R.id.notification_island_stop, stopPendingIntent)
+        }
+        builder.setCustomContentView(islandViews)
+        builder.setCustomBigContentView(islandViews)
+        // Brand blue (#78C8FF, the overlay ring's accent) tints the small
+        // icon and the default-layout progress bar.
+        builder.setColor(0xE678C8FF.toInt())
+
         // [T-android-live-update-completed] Same rule as the promoted branch:
         // no Stop once there is nothing left to stop.
         if (!isCompleted) {

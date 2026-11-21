@@ -27,7 +27,6 @@ import android.app.ActivityOptions
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.pm.UserInfo
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.os.Binder
@@ -480,27 +479,36 @@ internal class MinisShellDisplay(
         if (userId == myUser) return true
         return try {
             val um = context.getSystemService(UserManager::class.java) ?: return false
-            val info = um.getUserInfo(userId) // throws when the user doesn't exist
             val handle = UserHandle.getUserHandleForUid(userId * PER_USER_RANGE)
-            val flags = info.flags
-            // Simplified AppCopies whitelist (Mika's full AppCopies.usable
-            // reduced to public-API fields): the user must exist, be running,
-            // be unlocked, and be a plain secondary user — NOT a guest, a
-            // restricted user, or a managed work profile (FLAG_PROFILE covers
-            // all profile kinds; a dual-app / 双开 copy is a separate *user*,
-            // which passes). Private profiles (API 31+) and clones are
-            // refused by construction — documented simplification.
-            val usable = um.isUserRunning(handle) &&
-                um.isUserUnlocked(handle) &&
-                flags and (UserInfo.FLAG_GUEST or
-                    UserInfo.FLAG_RESTRICTED or
-                    UserInfo.FLAG_MANAGED_PROFILE or
-                    UserInfo.FLAG_PROFILE) == 0
-            usable
+            // API 36 dropped the int-based user-info surface (UserInfo,
+            // getUserInfo, isUserRunning(int)) from the SDK; running +
+            // unlocked still exist on UserHandle. The flag whitelist runs
+            // reflectively against the device framework (still present at
+            // runtime).
+            um.isUserRunning(handle) && um.isUserUnlocked(handle) && userFlagsOk(um, userId)
         } catch (t: Throwable) {
             Log.w(TAG, "userAllowed($userId) check failed: ${t.message}")
             false
         }
+    }
+
+    /**
+     * Reflective `UserManager.getUserInfo(int).flags` whitelist: guest
+     * (FLAG_GUEST=8), restricted (FLAG_RESTRICTED=16), managed profile
+     * (FLAG_MANAGED_PROFILE=32) and any profile kind (FLAG_PROFILE=2)
+     * are refused — 0x3A is their OR. A dual-app / 双开 copy is a
+     * separate *user* and passes. The public API 36 SDK no longer
+     * declares `UserInfo`, so this fails open when the reflection target
+     * is absent (documented simplification; running + unlocked is still
+     * enforced by the caller).
+     */
+    private fun userFlagsOk(um: UserManager, userId: Int): Boolean = runCatching {
+        val info = um.javaClass.getMethod("getUserInfo", Int::class.javaPrimitiveType).invoke(um, userId)
+        val flags = info.javaClass.getField("flags").getInt(info)
+        flags and 0x3A == 0
+    }.getOrElse {
+        Log.d(TAG, "user info unavailable for $userId, flag check skipped")
+        true
     }
 
     // ── input injection ───────────────────────────────────────────────────
@@ -596,8 +604,10 @@ internal class MinisShellDisplay(
         if (Build.VERSION.SDK_INT < 33) return null
         val launched = lastLaunched[displayId] ?: return null
         val (pkg, user) = launched
+        // API 36 dropped getPackageUidAsUser; the multi-user
+        // getPackageUid(String, user) overload remains on the SDK.
         return runCatching {
-            context.packageManager.getPackageUidAsUser(pkg, 0, user)
+            context.packageManager.getPackageUid(pkg, user)
         }.getOrNull()?.takeIf { it >= 0 }
     }
 

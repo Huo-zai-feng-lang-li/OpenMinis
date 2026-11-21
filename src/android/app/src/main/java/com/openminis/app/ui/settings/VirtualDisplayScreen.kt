@@ -45,7 +45,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
 import com.openminis.app.R
 import com.openminis.app.capsule.MinisCapsule
-import com.openminis.app.display.MinisAgentDisplay
+import com.openminis.app.display.AgentDisplayApi
 import com.openminis.app.display.MinisAgentDisplayManager
 import com.openminis.app.display.VdCreateResult
 import com.openminis.app.offload.ShizukuManager
@@ -70,10 +70,19 @@ private const val VD_STALE_MS = 3_000L
 fun VirtualDisplayScreen(onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    // stringResource is @Composable while click handlers are plain lambdas,
+    // so the resource reads are hoisted here; the formatted launch label
+    // uses context.getString with the argument instead.
+    val vdCreated = stringResource(R.string.vd_created)
+    val vdReleased = stringResource(R.string.vd_released)
+    val vdShotOk = stringResource(R.string.vd_shot_ok)
+    val vdShotNoFrame = stringResource(R.string.vd_shot_no_frame)
+    val vdShotNoMount = stringResource(R.string.vd_shot_no_mount)
+    val vdLaunchNoDisplay = stringResource(R.string.vd_launch_no_display)
     // One entry per create/release action + display id; the list is rebuilt
     // from the manager on every change.
     var displays by remember {
-        mutableStateOf<Set<MinisAgentDisplay>>(MinisAgentDisplayManager.list().toSet())
+        mutableStateOf<Set<AgentDisplayApi>>(MinisAgentDisplayManager.list().toSet())
     }
     var status by remember { mutableStateOf<String?>(null) }
     var pkg by remember { mutableStateOf("") }
@@ -155,7 +164,7 @@ fun VirtualDisplayScreen(onBack: () -> Unit) {
                         label = stringResource(R.string.vd_btn_create),
                         enabled = !busy,
                         onClick = {
-                            runAction(stringResource(R.string.vd_created)) {
+                            runAction(vdCreated) {
                                 val r = MinisAgentDisplayManager.create(
                                     context,
                                     w.toIntOrNull() ?: 1080,
@@ -171,7 +180,7 @@ fun VirtualDisplayScreen(onBack: () -> Unit) {
                             label = stringResource(R.string.vd_btn_release, d.displayId),
                             enabled = !busy,
                             onClick = {
-                                runAction(stringResource(R.string.vd_released)) {
+                                runAction(vdReleased) {
                                     MinisAgentDisplayManager.release(d.displayId)
                                 }
                             },
@@ -229,11 +238,11 @@ fun VirtualDisplayScreen(onBack: () -> Unit) {
                             MinisCapsule.expandPip(shown.displayId)
                         }
                         SmallButton(stringResource(R.string.vd_btn_shot)) {
-                            runAction(stringResource(R.string.vd_shot_ok)) {
+                            runAction(vdShotOk) {
                                 val png = shown.latestFramePng()
-                                    ?: error(stringResource(R.string.vd_shot_no_frame))
+                                    ?: error(vdShotNoFrame)
                                 val dir = PRootKernel.resolveHostPath(VD_ATTACHMENTS)
-                                    ?: error(stringResource(R.string.vd_shot_no_mount))
+                                    ?: error(vdShotNoMount)
                                 val f = java.io.File(dir, VD_SHOT_SUBDIR).apply { mkdirs() }
                                 val out = java.io.File(f, "vd_ui_${System.currentTimeMillis()}.png")
                                 java.io.FileOutputStream(out).use { it.write(png) }
@@ -269,8 +278,8 @@ fun VirtualDisplayScreen(onBack: () -> Unit) {
                         val target = shown ?: MinisAgentDisplayManager.list().lastOrNull()
                         val p = pkg.trim()
                         if (p.isEmpty()) return@SmallButton
-                        runAction(stringResource(R.string.vd_launch_ok, p)) {
-                            if (target == null) error(stringResource(R.string.vd_launch_no_display))
+                        runAction(context.getString(R.string.vd_launch_ok, p)) {
+                            if (target == null) error(vdLaunchNoDisplay)
                             val r = ShizukuManager.runProcess(
                                 listOf(
                                     "am", "start",
@@ -291,7 +300,7 @@ fun VirtualDisplayScreen(onBack: () -> Unit) {
 
 /** Inline 500ms-poll live frame (the capsule overlay is the primary path). */
 @Composable
-private fun VdPreviewPane(display: MinisAgentDisplay) {
+private fun VdPreviewPane(display: AgentDisplayApi) {
     var frame: Bitmap? by remember(display.displayId) { mutableStateOf(null) }
     var stale by remember(display.displayId) { mutableStateOf(false) }
 

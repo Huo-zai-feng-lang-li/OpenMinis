@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  T-android-island-visual: palette for the dark "island" card used by the
+  custom FGS notification view. The card surface matches the in-app floating
+  capsule (ToolOverlayController plate #E61C1C1E) and the accent is the
+  overlay ring's #78C8FF, so the notification reads like a sibling of the
+  capsule instead of a plain system row.
+-->
+<resources>
+    <!-- ~90% opaque dark card, so the system card behind it still shows through a hair. -->
+    <color name="notification_island_card">#E61C1C1E</color>
+    <!-- Bold white title, like a media island's track name. -->
+    <color name="notification_island_title">#FFFFFFFF</color>
+    <!-- Grey-white secondary line (artist / subtitle). -->
+    <color name="notification_island_subtitle">#B0B0B6</color>
+    <!-- Left icon tile: ~20% white over the dark card. -->
+    <color name="notification_island_icon_tile">#33FFFFFF</color>
+    <!-- Brand blue progress fill + faint track. -->
+    <color name="notification_island_progress">#CC78C8FF</color>
+    <color name="notification_island_progress_track">#1FFFFFFF</color>
+    <!-- Stop capsule: subtle ~16% white fill, bright white label. -->
+    <color name="notification_island_stop_bg">#29FFFFFF</color>
+    <color name="notification_island_stop_text">#E6FFFFFF</color>
+</resources>
