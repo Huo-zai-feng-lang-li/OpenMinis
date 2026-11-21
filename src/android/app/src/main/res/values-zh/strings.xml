@@ -168,6 +168,21 @@
     <string name="settings_skills_subtitle">管理 Minis Agent 的技能与指令</string>
     <string name="settings_memory">记忆</string>
     <string name="settings_memory_subtitle">跨会话保留的持久化知识</string>
+    <!-- [T-system-rules] 系统规则设置入口 + 编辑页 -->
+    <string name="settings_system_rules">系统规则</string>
+    <string name="settings_system_rules_subtitle">注入每个会话的最高优先级常驻指令</string>
+    <string name="system_rules_enable_header">启用</string>
+    <string name="system_rules_enable_title">启用系统规则</string>
+    <string name="system_rules_enable_subtitle">关闭时模型完全不注入任何规则；开启后每轮对话注入非空的规则内容。</string>
+    <string name="system_rules_rules_header">规则内容</string>
+    <string name="system_rules_editor_label">系统运行规则</string>
+    <string name="system_rules_editor_placeholder">填写系统运行规则</string>
+    <string name="system_rules_empty_footer">即使开关开启，内容为空时也不注入。保存后，下一轮对话即生效。</string>
+    <string name="system_rules_scope_header">生效范围</string>
+    <string name="system_rules_group_scoped_title">仅对指定模型组生效</string>
+    <string name="system_rules_group_scoped_subtitle">默认对全部模型组生效。开启后，仅对下方勾选的模型组生效。</string>
+    <string name="system_rules_no_groups">还没有模型组，请先到模型组页面创建。</string>
+    <string name="system_rules_saved_note">已保存，下一轮对话生效。</string>
     <string name="settings_mcp">MCP 集成</string>
     <string name="settings_mcp_subtitle">连接 Model Context Protocol 服务器</string>
     <string name="mcp_title">MCP 集成</string>

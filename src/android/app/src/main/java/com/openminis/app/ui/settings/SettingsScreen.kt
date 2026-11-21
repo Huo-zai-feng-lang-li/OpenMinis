@@ -95,6 +95,10 @@ fun SettingsScreen(
     onSkillsClick: () -> Unit = {},
     onTerminalClick: () -> Unit = {},
     onMemoryClick: () -> Unit = {},
+    // [T-system-rules] System Rules page (highest-priority standing
+    // instructions, filesDir/minis-global/system-rules.md). Default no-op
+    // for callers that haven't wired the route yet.
+    onSystemRulesClick: () -> Unit = {},
     /** [T-p2-agent-settings] Settings › Agents (delegation on/off), below Memory. */
     onAgentsClick: () -> Unit = {},
     onAgentToolsClick: () -> Unit = {},
@@ -236,6 +240,17 @@ fun SettingsScreen(
                     title = stringResource(R.string.settings_memory),
                     subtitle = stringResource(R.string.settings_memory_subtitle),
                     onClick = onMemoryClick,
+                )
+                // [T-system-rules] System Rules — between Memory and MCP:
+                // standing behavior rules that outrank everything else
+                // injected into the system prompt. Android-only feature
+                // (iOS has no counterpart); shield icon for "rules".
+                SettingsItem(
+                    icon = Icons.Outlined.Shield,
+                    iconColor = Color(0xFFAF52DE),
+                    title = stringResource(R.string.settings_system_rules),
+                    subtitle = stringResource(R.string.settings_system_rules_subtitle),
+                    onClick = onSystemRulesClick,
                 )
                 // [T-mcp-integration-android] MCP Integrations — below Memory.
                 // [T-android-mcp-icon-distinct] Dashboard (2x2 block grid) instead of

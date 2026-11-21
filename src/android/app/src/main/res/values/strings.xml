@@ -200,6 +200,21 @@
     <string name="settings_skills_subtitle">Manage Minis Agent skills and instructions</string>
     <string name="settings_memory">Memory</string>
     <string name="settings_memory_subtitle">Persistent knowledge across sessions</string>
+    <!-- [T-system-rules] System Rules settings entry + editor screen -->
+    <string name="settings_system_rules">System Rules</string>
+    <string name="settings_system_rules_subtitle">Highest-priority standing instructions for every session</string>
+    <string name="system_rules_enable_header">Enable</string>
+    <string name="system_rules_enable_title">Enable system rules</string>
+    <string name="system_rules_enable_subtitle">When off, the model never sees any rules, regardless of the content below. When on, non-empty content is injected into every chat turn.</string>
+    <string name="system_rules_rules_header">Rules content</string>
+    <string name="system_rules_editor_label">System running rules</string>
+    <string name="system_rules_editor_placeholder">Fill in the system running rules</string>
+    <string name="system_rules_empty_footer">Even with the switch on, empty content is not injected. Changes apply from the next chat turn after saving.</string>
+    <string name="system_rules_scope_header">Scope</string>
+    <string name="system_rules_group_scoped_title">Apply only to specified model groups</string>
+    <string name="system_rules_group_scoped_subtitle">Applies to all model groups by default. When on, the rules only apply to the groups checked below.</string>
+    <string name="system_rules_no_groups">No model groups yet. Create one on the Model Groups page first.</string>
+    <string name="system_rules_saved_note">Saved. Applies from the next chat turn.</string>
     <!-- [T-mcp-integration-android] MCP Integrations settings entry + management screen -->
     <string name="settings_mcp">MCP Integrations</string>
     <string name="settings_mcp_subtitle">Connect Model Context Protocol servers</string>

@@ -167,6 +167,21 @@
     <string name="settings_skills_subtitle">管理 Minis Agent 的技能與指示</string>
     <string name="settings_memory">記憶</string>
     <string name="settings_memory_subtitle">跨工作階段的持續性知識</string>
+    <!-- [T-system-rules] 系統規則設定入口 + 編輯頁 -->
+    <string name="settings_system_rules">系統規則</string>
+    <string name="settings_system_rules_subtitle">注入每個會話的最高優先級常駐指令</string>
+    <string name="system_rules_enable_header">啟用</string>
+    <string name="system_rules_enable_title">啟用系統規則</string>
+    <string name="system_rules_enable_subtitle">關閉時模型完全不注入任何規則；開啟後每輪對話注入非空的規則內容。</string>
+    <string name="system_rules_rules_header">規則內容</string>
+    <string name="system_rules_editor_label">系統運行規則</string>
+    <string name="system_rules_editor_placeholder">填寫系統運行規則</string>
+    <string name="system_rules_empty_footer">即使開關開啟，內容為空時也不注入。儲存後，下一輪對話即生效。</string>
+    <string name="system_rules_scope_header">生效範圍</string>
+    <string name="system_rules_group_scoped_title">僅對指定模型組生效</string>
+    <string name="system_rules_group_scoped_subtitle">預設對全部模型組生效。開啟後，僅對下方勾選的模型組生效。</string>
+    <string name="system_rules_no_groups">還沒有模型組，請先到模型組頁面建立。</string>
+    <string name="system_rules_saved_note">已儲存，下一輪對話生效。</string>
     <string name="settings_mcp">MCP 整合</string>
     <string name="settings_mcp_subtitle">連接 Model Context Protocol 伺服器</string>
     <string name="mcp_title">MCP 整合</string>
