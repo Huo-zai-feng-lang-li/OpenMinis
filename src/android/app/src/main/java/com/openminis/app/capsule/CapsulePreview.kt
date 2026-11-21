@@ -109,6 +109,8 @@ object MinisCapsule {
     private var hostService: MinisAccessibilityService? = null
     private var capsuleWindow: VdOverlayWindow? = null
     private var capsulePlacement: OverlayPlacement? = null
+    private var dragStart: OverlayPlacement? = null
+    private var lastPlaceMs = 0L
     private var managed = false
 
     private val onDisplayChanged: () -> Unit = { refresh() }
@@ -189,38 +191,59 @@ object MinisCapsule {
         } ?: return
         capsulePlacement = placement
         // The whole card is the drag handle; a tap still reaches the frame
-        // (drag only after the touch slop). The window follows the finger 1:1:
-        // gravity is BOTTOM|END, so the x offset is measured from the RIGHT
-        // edge and the y offset from the BOTTOM edge — a rightward/downward
-        // finger delta DECREASES both offsets (the old code added dx, which
-        // made horizontal drags fly the other way).
+        // (drag only after the touch slop). The window follows the finger 1:1.
+        //
+        // Correctness: OverlayDrag.move()/end() pass the CUMULATIVE delta since
+        // the gesture's DOWN point, so each move() call recomputes the target
+        // from the gesture-start placement ([dragStart]), NOT from the
+        // already-moved [capsulePlacement] (subtracting a cumulative delta from
+        // a moved position compounds the error and makes the card run ahead of
+        // the finger). gravity is BOTTOM|END, so the x offset is measured from
+        // the RIGHT edge and the y offset from the BOTTOM edge — a rightward /
+        // downward finger delta DECREASES both offsets.
         window.draggable(object : OverlayDrag {
-            override fun start() {}
+            override fun start() {
+                dragStart = capsulePlacement
+            }
 
             override fun move(dx: Float, dy: Float) {
                 moveCapsule(dx, dy)
             }
 
-            override fun end(dx: Float, dy: Float) {}
+            override fun end(dx: Float, dy: Float) {
+                // Final precise snap (throttled MOVEs may have left the card
+                // up to 1 frame behind the finger on a fast release).
+                moveCapsule(dx, dy, final = true)
+                dragStart = null
+            }
         })
         capsuleWindow = window
         AppLogger.info(TAG, "capsule mounted on display $displayId")
     }
 
     /**
-     * Move the capsule window by screen-relative deltas ([dx] + = right,
-     * [dy] + = down), clamped to the screen. Offsets live in
-     * [capsulePlacement] so drags accumulate correctly against the
-     * BOTTOM|END anchor.
+     * Move the capsule to the position [dx]/[dy] (screen-relative, + =
+     * right / down) past the gesture-start anchor [dragStart], clamped to the
+     * screen. [dx]/[dy] are the CUMULATIVE deltas since the drag's DOWN
+     * point, so this recomputes from [dragStart] every time (never from the
+     * already-moved [capsulePlacement], which would compound the error).
      */
-    private fun moveCapsule(dx: Float, dy: Float) {
+    private fun moveCapsule(dx: Float, dy: Float, final: Boolean = false) {
         val w = capsuleWindow ?: return
-        val p = capsulePlacement ?: return
+        val s = dragStart ?: return
         val a = host?.area() ?: return
-        val nx = (p.x - dx).toInt().coerceIn(0, maxOf(0, a.width - w.width))
-        val ny = (p.y - dy).toInt().coerceIn(0, maxOf(0, a.height - w.height))
-        val np = OverlayPlacement(p.gravity, nx, ny)
+        val nx = (s.x - dx).toInt().coerceIn(0, maxOf(0, a.width - w.width))
+        val ny = (s.y - dy).toInt().coerceIn(0, maxOf(0, a.height - w.height))
+        val np = OverlayPlacement(s.gravity, nx, ny)
         capsulePlacement = np
+        // Throttle updateViewLayout to ~60Hz: touch moves arrive at 90-120Hz
+        // and each place() is a synchronous WindowManager IPC; unthrottled
+        // that is the capsule's own jank source. Non-final moves that fall
+        // inside the 16ms window are skipped (the next move carries the newer
+        // cumulative delta); the final move always lands precisely.
+        val now = SystemClock.uptimeMillis()
+        if (!final && now - lastPlaceMs < 16L) return
+        lastPlaceMs = now
         w.place(np)
     }
 
@@ -231,6 +254,7 @@ object MinisCapsule {
         capsuleWindow?.close()
         capsuleWindow = null
         capsulePlacement = null
+        dragStart = null
         VdAgentPip.close()
     }
 

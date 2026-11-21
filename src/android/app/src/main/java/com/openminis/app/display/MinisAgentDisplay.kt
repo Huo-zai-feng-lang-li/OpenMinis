@@ -543,6 +543,25 @@ object MinisAgentDisplayManager {
 
     private val lock = Any()
     private val active = LinkedHashMap<Int, AgentDisplayApi>()
+    /**
+     * Session binding (displayId → owning chat session id): every display in
+     * [active] — in-process `MinisAgentDisplay` AND the Shizuku shell-host
+     * `MinisShellAgentDisplay`, which share this map — is recorded with the
+     * session that created it (a null owner is stored as "", i.e. "no
+     * owner").
+     *
+     * Why: the product rule is "同屏全局只活 1 块" — one live display at a
+     * time per screen, and it must FOLLOW its chat session. On session
+     * switch the caller invokes [releaseOtherSessions] to free every other
+     * session's display; the capsule overlay (MinisCapsule) is already
+     * bound to the display change listener, so its window disappears
+     * automatically when its display is released — no capsule-side change.
+     * The map is a thread-safe [java.util.concurrent.ConcurrentHashMap]
+     * because the offload handler and the UI may read it without holding
+     * [lock]; every mutation still happens under [lock].
+     */
+    val ownerSessions: MutableMap<Int, String> =
+        java.util.concurrent.ConcurrentHashMap()
     private val awake = VdAwake(::pokeDisplay)
     private var userActivity: Pair<Any, Method>? = null
     private var userActivityResolved = false
@@ -551,6 +570,12 @@ object MinisAgentDisplayManager {
      * Create a virtual display. [width]/[height]/[dpi] default to the main
      * display's physical size/density (Mika creates agent displays 1:1 with
      * the main screen).
+     *
+     * [ownerSession] — session binding: the chat session id that owns this
+     * display, recorded in [ownerSessions] (null = unowned, stored as "").
+     * Default null keeps every existing caller source-compatible; callers
+     * that pass it get "same-screen, only one live" semantics via
+     * [releaseOtherSessions] / [releaseSession] on session switch/teardown.
      *
      * Creation tries the trusted flag set first and retries exactly once
      * without the trust bits when the framework refuses them with a
@@ -565,6 +590,7 @@ object MinisAgentDisplayManager {
         width: Int? = null,
         height: Int? = null,
         dpi: Int? = null,
+        ownerSession: String? = null,
     ): VdCreateResult {
         val dm = context.getSystemService(DisplayManager::class.java)
         val main = dm.displays.firstOrNull { it.displayId == Display.DEFAULT_DISPLAY }
@@ -601,13 +627,13 @@ object MinisAgentDisplayManager {
                 // P0 review fix: broad catch (Throwable, not just
                 // SecurityException) so an unexpected retry failure degrades
                 // to the shell fallback instead of escaping the method.
-                return shellFallback(context, name, reader, w, h, d,
+                return shellFallback(context, name, reader, w, h, d, ownerSession,
                     "trusted: ${se.message}; untrusted: ${e.javaClass.simpleName}: ${e.message}")
             }
         } catch (e: Throwable) {
             // Non-security failure in-process (OOM, …) — still try the shell
             // host; it is the documented M1 path for any CREATION_FAILED.
-            return shellFallback(context, name, reader, w, h, d,
+            return shellFallback(context, name, reader, w, h, d, ownerSession,
                 "${e.javaClass.simpleName}: ${e.message ?: "unknown"}")
         }
 
@@ -618,7 +644,12 @@ object MinisAgentDisplayManager {
         )
         display.setupDisplayConfiguration()
         if (awakeNeeded(display.flags, display.displayId)) awake.start(display.displayId)
-        synchronized(lock) { active[display.displayId] = display }
+        synchronized(lock) {
+            active[display.displayId] = display
+            // Session binding: record the owning session (null → "") so
+            // releaseOtherSessions can free it on session switch.
+            ownerSessions[display.displayId] = ownerSession ?: ""
+        }
         AppLogger.info(TAG, "created $name: displayId=${display.displayId} trusted=$trusted flags=0x${flags.toString(16)}")
         notifyChanged()
         return VdCreateResult.Ok(display)
@@ -646,6 +677,7 @@ object MinisAgentDisplayManager {
         w: Int,
         h: Int,
         d: Int,
+        ownerSession: String?,
         inProcessError: String,
     ): VdCreateResult {
         AppLogger.info(TAG, "in-process creation failed ($inProcessError); trying Shizuku shell host")
@@ -664,7 +696,7 @@ object MinisAgentDisplayManager {
         // Keep-awake for a shell-owned OWN_DISPLAY_GROUP display lives INSIDE
         // the host process (its own DisplayAwake port); the local one would
         // report user activity for a display it does not own.
-        synchronized(lock) { active[shellId] = display }
+        synchronized(lock) { active[shellId] = display; ownerSessions[shellId] = ownerSession ?: "" }
         AppLogger.info(TAG, "shell host created display $shellId for $name (in-process: $inProcessError)")
         return VdCreateResult.Ok(display)
     }
@@ -698,7 +730,14 @@ object MinisAgentDisplayManager {
 
     /** Destroy one display and stop its keep-awake. True if it was tracked. */
     fun release(displayId: Int): Boolean {
-        val d = synchronized(lock) { active.remove(displayId) } ?: return false
+        val d = synchronized(lock) {
+            val removed = active.remove(displayId)
+            // Clear the owner binding together with the display so a later
+            // session that reuses a recycled display id never inherits a
+            // stale owner.
+            ownerSessions.remove(displayId)
+            removed
+        } ?: return false
         awake.stop(displayId)
         d.release()
         AppLogger.info(TAG, "released display $displayId")
@@ -711,11 +750,58 @@ object MinisAgentDisplayManager {
         val removed = synchronized(lock) {
             val v = active.values.toList()
             active.clear()
+            ownerSessions.clear()
             v
         }
         if (removed.isEmpty()) return
         removed.forEach { awake.stop(it.displayId); it.release() }
         notifyChanged()
+    }
+
+    /**
+     * "同屏全局只活 1 块" — when the [owner] chat session becomes active
+     * (session switch), free every display that belongs to a DIFFERENT
+     * session, keeping only [owner]'s.
+     *
+     * Why: displays follow their chat session. The capsule overlay
+     * (MinisCapsule) is bound to the display change listener, so once another
+     * session's display is released its capsule disappears on its own — the
+     * caller only has to stop opening a new session's display while the old
+     * one is still live.
+     *
+     * Semantics:
+     *  - [owner] non-blank: keep the same-owner displays, release every
+     *    other display. Displays with no recorded owner ("" — created before
+     *    session binding, or by a caller that did not pass [ownerSession])
+     *    are released too, since they are not owned by [owner].
+     *  - [owner] blank (""): the caller itself has no session → release ALL
+     *    active displays.
+     *
+     * @return the list of displayIds actually released (empty when nothing
+     * had to be freed).
+     */
+    fun releaseOtherSessions(owner: String): List<Int> {
+        val targets = synchronized(lock) {
+            active.keys.filter { id -> owner.isBlank() || ownerSessions[id] != owner }
+        }
+        targets.forEach { release(it) }
+        return targets
+    }
+
+    /**
+     * Session-teardown cleanup: free every display owned by [owner] itself,
+     * so a finished task never leaves its display (and capsule) alive past
+     * the session. Complements [releaseOtherSessions] — that one runs on
+     * switch-IN, this one on session END.
+     *
+     * @return the list of displayIds actually released.
+     */
+    fun releaseSession(owner: String): List<Int> {
+        val targets = synchronized(lock) {
+            active.keys.filter { id -> ownerSessions[id] == owner }
+        }
+        targets.forEach { release(it) }
+        return targets
     }
 
     // ── keep-awake (Mika DisplayAwake semantics) ─────────────────────────────

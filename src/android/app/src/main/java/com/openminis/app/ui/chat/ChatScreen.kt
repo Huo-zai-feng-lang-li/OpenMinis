@@ -851,6 +851,39 @@ fun ChatScreen(
         com.openminis.app.diagnostics.HangDetector.markHealthyTick()
     }
 
+    // [vd-session-binding] "同屏全局只活 1 块": displays are bound to chat
+    // sessions. When THIS session becomes active, free every display owned by
+    // another session — the capsule overlay (MinisCapsule) is bound to the
+    // display change listener, so its window vanishes automatically; no
+    // capsule-side change needed. This stops a new session from piling a
+    // display on top of an old session's still-live one.
+    //
+    // LaunchedEffect(sessionId) re-runs only when the session changes (or on
+    // first composition of this instance); [lastVdReleaseSession] dedupes
+    // re-runs within the same composable instance (e.g. config-change
+    // recomposition) so first launch / recomposition does not re-release.
+    // Re-entering a session later (new instance, after another session ran)
+    // does re-release — that is the intended "one live display per screen"
+    // behavior.
+    // runCatching: a release failure must log, never crash the chat UI.
+    val lastVdReleaseSession = remember { mutableStateOf<String?>(null) }
+    androidx.compose.runtime.LaunchedEffect(sessionId) {
+        if (lastVdReleaseSession.value == sessionId) return@LaunchedEffect
+        lastVdReleaseSession.value = sessionId
+        // withContext is suspend, so it runs in the LaunchedEffect coroutine;
+        // the release itself is wrapped in runCatching — a failure only logs,
+        // it never crashes the chat UI.
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+            runCatching {
+                com.openminis.app.display.MinisAgentDisplayManager.releaseOtherSessions(sessionId)
+            }.onFailure {
+                com.openminis.app.logging.AppLogger.warning(
+                    "ChatScreen", "vd session-release $sessionId failed: ${it.message}",
+                )
+            }
+        }
+    }
+
     // Drain any pending Move-to transfer when entering this session — the
     // source ChatScreen stashed (inputText + attachments) into the global
     // ChatViewModelStore.pendingTransfer slot before navigating here.

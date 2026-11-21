@@ -87,19 +87,19 @@ jobs:
           ls -la dist/
 
 
-      - name: Publish release (in-app update protocol, tag 1.23)
+      - name: Publish release (in-app update protocol, tag 1.24)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           apk=$(find dist -name '*.apk' | head -1)
-          out="MinisApp-1.23-build54-arm64-v8a.apk"
+          out="MinisApp-1.24-build55-arm64-v8a.apk"
           cp "$apk" "$out"
-          if gh release view 1.23 >/dev/null 2>&1; then
-            gh release upload 1.23 "$out" --clobber
+          if gh release view 1.24 >/dev/null 2>&1; then
+            gh release upload 1.24 "$out" --clobber
           else
-            gh release create 1.23 \
-              --title "Minis 1.23 (build 54, virtual display hardening)" \
-              --notes "Virtual display: `launch` now force-stops the target app's own instance first, so an app already running on the main screen actually moves onto the virtual display (a bare am start only reports 'delivered to running instance' and never moves it). `create` now sweeps idle displays first (no frame, or last frame >10 min) and caps fresh displays, so repeated attempts no longer leak framebuffers (194-200 class leak). Includes the 1.22 clean-island notification. Perf (AOT) build. In-place update over 1.22." "$out"
+            gh release create 1.24 \
+              --title "Minis 1.24 (build 55, one-shot run + session-bound virtual display)" \
+              --notes "Virtual display, fast + accurate + session-bound: (1) new one-shot `run <component> [--user u]` = create + move app onto the display + wait for first real frame + screenshot in a single call (returns framed/shotPath/waitedMs; waits end at the first frame, not the full timeout); (2) session binding: each display is tagged with its creating chat session, only ONE display is live globally — switching to another session auto-releases the previous one and its capsule, so opening a display in a new session never spawns a second one; (3) capsule drag now follows the finger 1:1 (fixed cumulative-delta drift) with 60Hz update throttling so dragging itself stays smooth; (4) launch keeps the 1.23 force-stop-move. Perf (AOT, non-debuggable) build. In-place update over 1.23." "$out"
           fi
 
       - uses: actions/upload-artifact@v4
