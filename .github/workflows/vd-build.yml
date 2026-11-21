@@ -59,15 +59,17 @@ jobs:
           ls -la dist/
 
 
-      - name: Publish to release (public, no-auth download)
+      - name: Publish release (in-app update protocol: tag 1.15, MinisApp-<ver>-build<N>-<abi>.apk)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           apk=$(find dist -name '*.apk' | head -1)
-          if gh release view vd-debug-latest >/dev/null 2>&1; then
-            gh release upload vd-debug-latest "$apk" --clobber
+          out="MinisApp-1.15-vd-build38-arm64-v8a.apk"
+          cp "$apk" "$out"
+          if gh release view 1.15 >/dev/null 2>&1; then
+            gh release upload 1.15 "$out" --clobber
           else
-            gh release create vd-debug-latest --title "Minis VD debug build" --notes "Rolling auto-updated" "$apk"
+            gh release create 1.15 --title "Minis VD build 38 (virtual display + system rules)" --notes "Auto-updated rolling build. In-app 'check update' picks this up (build 38 > installed 37)." "$out"
           fi
 
       - uses: actions/upload-artifact@v4
