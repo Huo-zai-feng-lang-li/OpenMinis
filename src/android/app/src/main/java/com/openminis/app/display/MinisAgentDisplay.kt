@@ -16,6 +16,7 @@ import android.os.SystemClock
 import android.view.Display
 import android.view.Surface
 import com.openminis.app.logging.AppLogger
+import com.openminis.app.shizuku.MinisShellClient
 import java.io.ByteArrayOutputStream
 import java.lang.reflect.Method
 import java.util.concurrent.Executors
@@ -45,9 +46,39 @@ import java.util.concurrent.TimeUnit
  * route is the documented next step).
  */
 
+/**
+ * What the app sees from an agent virtual display, no matter who owns it:
+ * the P0 in-process owner ([MinisAgentDisplay], uid = app) or the M1 Shizuku
+ * shell host ([MinisShellAgentDisplay], uid 2000). `android-vd-cli` talks
+ * to this shape, so the CREATION_FAILED fallback below is transparent to
+ * the CLI surface.
+ */
+interface AgentDisplayApi : AutoCloseable {
+    val displayId: Int
+    val name: String
+    val bufferWidth: Int
+    val bufferHeight: Int
+    val dpi: Int
+    /** Flags the display was created with (the REQUESTED set, for shell-owned displays that may have downgraded). */
+    val flags: Int
+    val trusted: Boolean
+    val createdWallMs: Long
+    /** Logical size at the current rotation. */
+    val width: Int
+    val height: Int
+    val hasFrameNow: Boolean
+    fun latestFramePng(): ByteArray?
+    fun latestFrameBitmap(): Bitmap?
+    fun lastFrameAt(): Long?
+    fun isLastFrameBlack(): Boolean?
+    /** Release the display and its frame pipeline. Idempotent. */
+    fun release()
+    override fun close()
+}
+
 /** Outcome of [MinisAgentDisplayManager.create]. */
 sealed class VdCreateResult {
-    data class Ok(val display: MinisAgentDisplay) : VdCreateResult()
+    data class Ok(val display: AgentDisplayApi) : VdCreateResult()
     data class Failed(val code: String, val message: String) : VdCreateResult()
 }
 
@@ -67,16 +98,16 @@ class MinisAgentDisplay internal constructor(
     private val virtualDisplay: VirtualDisplay,
     private val reader: ImageReader,
     private val thread: HandlerThread,
-    val name: String,
-    val bufferWidth: Int,
-    val bufferHeight: Int,
-    val dpi: Int,
-    val flags: Int,
-    val trusted: Boolean,
-) : AutoCloseable {
+    override val name: String,
+    override val bufferWidth: Int,
+    override val bufferHeight: Int,
+    override val dpi: Int,
+    override val flags: Int,
+    override val trusted: Boolean,
+) : AgentDisplayApi {
 
-    val displayId: Int = virtualDisplay.display.displayId
-    val createdWallMs: Long = System.currentTimeMillis()
+    override val displayId: Int = virtualDisplay.display.displayId
+    override val createdWallMs: Long = System.currentTimeMillis()
 
     private val handler = Handler(thread.looper)
 
@@ -89,9 +120,9 @@ class MinisAgentDisplay internal constructor(
         )
 
     /** Logical width of the current orientation (buffer size swapped on 90/270). */
-    val width: Int get() = geometry.width
+    override val width: Int get() = geometry.width
     /** Logical height of the current orientation. */
-    val height: Int get() = geometry.height
+    override val height: Int get() = geometry.height
 
     private val frameLock = Any()
     private var fullFrame: Bitmap? = null // stride-padded full frame, width = rowStride / pixelStride
@@ -160,7 +191,7 @@ class MinisAgentDisplay internal constructor(
     }
 
     /** Full-frame PNG of the latest frame, or null while no frame has been produced yet. */
-    fun latestFramePng(): ByteArray? {
+    override fun latestFramePng(): ByteArray? {
         val crop = latestFrameBitmap() ?: return null
         return try {
             ByteArrayOutputStream().also { crop.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
@@ -170,17 +201,17 @@ class MinisAgentDisplay internal constructor(
     }
 
     /** Upright (rotated) copy of the latest frame at original resolution; caller recycles. */
-    fun latestFrameBitmap(): Bitmap? = synchronized(frameLock) {
+    override fun latestFrameBitmap(): Bitmap? = synchronized(frameLock) {
         val bmp = fullFrame
         if (!hasFrame || bmp == null) null else vdUprightFrame(bmp, frameGeometry, paint = paint)
     }
 
     /** Producer timestamp (monotonic ns) of the latest published frame, or null. */
-    fun lastFrameAt(): Long? = synchronized(frameLock) {
+    override fun lastFrameAt(): Long? = synchronized(frameLock) {
         frameTimestampNanos.takeIf { !released && it > 0 }
     }
 
-    val hasFrameNow: Boolean get() = synchronized(frameLock) { hasFrame && !released }
+    override val hasFrameNow: Boolean get() = synchronized(frameLock) { hasFrame && !released }
 
     /**
      * Black-frame guard (ported from Mika `FrameMath.isBlack`): sample a
@@ -188,7 +219,7 @@ class MinisAgentDisplay internal constructor(
      * ≤ 8 means "no real content" (secure-window capture path, GPU failure,
      * or a display group that fell asleep).
      */
-    fun isLastFrameBlack(): Boolean? = synchronized(frameLock) {
+    override fun isLastFrameBlack(): Boolean? = synchronized(frameLock) {
         val bmp = fullFrame
         if (!hasFrame || bmp == null) null else VdFrameMath.isBlack(bmp)
     }
@@ -233,7 +264,7 @@ class MinisAgentDisplay internal constructor(
     }.isSuccess
 
     /** Release the display, its reader and the frame thread. Idempotent. */
-    fun release() {
+    override fun release() {
         if (released) return
         released = true
         handler.removeCallbacksAndMessages(null)
@@ -255,6 +286,171 @@ class MinisAgentDisplay internal constructor(
 
     private companion object {
         const val TAG = "MinisAgentDisplay"
+        const val FRAME_INTERVAL_MS = 100L
+    }
+}
+
+/**
+ * M1 — a virtual display whose *owner* is the Shizuku shell host (uid 2000),
+ * reached through [MinisShellClient], while the app process still owns the
+ * [ImageReader] the host was handed. The frame pipeline is identical to
+ * [MinisAgentDisplay] (≤10fps, stride handling, upright rotation, black-frame
+ * guard); only the creation/release of the [VirtualDisplay] moves to the
+ * privileged helper. This is what [MinisAgentDisplayManager.shellFallback]
+ * returns when in-process creation is refused.
+ *
+ * Unlike [MinisAgentDisplay] the local process does NOT hold a
+ * [VirtualDisplay] handle (it never called `createVirtualDisplay`), so there
+ * is no local `virtualDisplay.release()`; `release()` tells the host to free
+ * its side and shuts down the app-side reader/thread.
+ */
+class MinisShellAgentDisplay internal constructor(
+    private val context: Context,
+    private val reader: ImageReader,
+    override val displayId: Int,
+    override val name: String,
+    override val bufferWidth: Int,
+    override val bufferHeight: Int,
+    override val dpi: Int,
+) : AgentDisplayApi {
+
+    override val flags: Int = VdFlags.displayFlags(Build.VERSION.SDK_INT, trusted = true)
+    /**
+     * The host was asked for the trusted set; if this ROM's shell lacks
+     * ADD_TRUSTED_DISPLAY it silently downgraded and we cannot tell from the
+     * binder (the AIDL returns only the displayId). Reported as requested.
+     */
+    override val trusted: Boolean = true
+    override val createdWallMs: Long = System.currentTimeMillis()
+
+    private val thread = HandlerThread(name).apply { start() }
+    private val handler = Handler(thread.looper)
+
+    // Same fixed physical buffer; logical size rotates with the display.
+    // The display is owned by the shell host, so rotation is read from the
+    // app-visible Display object (not a local VirtualDisplay handle).
+    private val geometry: VdFrameGeometry
+        get() = VdFrameGeometry(
+            bufferWidth, bufferHeight,
+            runCatching {
+                (context.getSystemService(DisplayManager::class.java) as? DisplayManager)
+                    ?.getDisplay(displayId)?.rotation
+            }.getOrNull() ?: Surface.ROTATION_0,
+        )
+
+    override val width: Int get() = geometry.width
+    override val height: Int get() = geometry.height
+
+    private val frameLock = Any()
+    private var fullFrame: Bitmap? = null
+    private var hasFrame = false
+    private var frameGeometry = VdFrameGeometry(bufferWidth, bufferHeight, Surface.ROTATION_0)
+    private var lastProcessedAt = 0L
+    private var pending = false
+    private var frameTimestampNanos = 0L
+    @Volatile
+    private var released = false
+
+    private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
+
+    private val process = Runnable {
+        pending = false
+        lastProcessedAt = SystemClock.uptimeMillis()
+        processLatest()
+    }
+
+    init {
+        reader.setOnImageAvailableListener({ schedule() }, handler)
+        handler.post { schedule() }
+    }
+
+    private fun schedule() {
+        if (pending || released) return
+        pending = true
+        val wait = lastProcessedAt + FRAME_INTERVAL_MS - SystemClock.uptimeMillis()
+        if (wait > 0) handler.postDelayed(process, wait) else handler.post(process)
+    }
+
+    private fun processLatest() {
+        if (released) return
+        val image = try {
+            reader.acquireLatestImage()
+        } catch (t: Throwable) {
+            AppLogger.warning(SHELL_TAG, "acquireLatestImage failed: ${t.javaClass.simpleName}")
+            null
+        } ?: return
+        try {
+            val plane = image.planes[0]
+            val strideWidth = plane.rowStride / plane.pixelStride
+            val capturedGeometry = geometry
+            synchronized(frameLock) {
+                var bmp = fullFrame
+                if (bmp == null || bmp.width != strideWidth) {
+                    bmp?.recycle()
+                    bmp = Bitmap.createBitmap(strideWidth, bufferHeight, Bitmap.Config.ARGB_8888)
+                    fullFrame = bmp
+                }
+                bmp!!.copyPixelsFromBuffer(plane.buffer.rewind())
+                hasFrame = true
+                frameTimestampNanos = image.timestamp
+                frameGeometry = capturedGeometry
+            }
+        } finally {
+            image.close()
+        }
+    }
+
+    override fun latestFramePng(): ByteArray? {
+        val crop = latestFrameBitmap() ?: return null
+        return try {
+            ByteArrayOutputStream().also { crop.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        } finally {
+            crop.recycle()
+        }
+    }
+
+    override fun latestFrameBitmap(): Bitmap? = synchronized(frameLock) {
+        val bmp = fullFrame
+        if (!hasFrame || bmp == null) null else vdUprightFrame(bmp, frameGeometry, paint = paint)
+    }
+
+    override fun lastFrameAt(): Long? = synchronized(frameLock) {
+        frameTimestampNanos.takeIf { !released && it > 0 }
+    }
+
+    override val hasFrameNow: Boolean get() = synchronized(frameLock) { hasFrame && !released }
+
+    override fun isLastFrameBlack(): Boolean? = synchronized(frameLock) {
+        val bmp = fullFrame
+        if (!hasFrame || bmp == null) null else VdFrameMath.isBlack(bmp)
+    }
+
+    /**
+     * Release the app-side pipeline and ask the shell host to free its
+     * display. Idempotent. (Keep-awake for this display runs inside the host
+     * process — see [MinisAgentDisplayManager.shellFallback].)
+     */
+    override fun release() {
+        if (released) return
+        released = true
+        handler.removeCallbacksAndMessages(null)
+        handler.post {
+            runCatching { reader.close() }
+            synchronized(frameLock) {
+                fullFrame?.recycle()
+                fullFrame = null
+                hasFrame = false
+            }
+        }
+        thread.quitSafely()
+        MinisShellClient.releaseDisplay(displayId)
+        AppLogger.info(SHELL_TAG, "released shell-owned display $displayId")
+    }
+
+    override fun close() = release()
+
+    private companion object {
+        const val SHELL_TAG = "MinisShellAgentDisplay"
         const val FRAME_INTERVAL_MS = 100L
     }
 }
@@ -298,7 +494,7 @@ object MinisAgentDisplayManager {
     private const val NAME_PREFIX = "minis-vd"
 
     private val lock = Any()
-    private val active = LinkedHashMap<Int, MinisAgentDisplay>()
+    private val active = LinkedHashMap<Int, AgentDisplayApi>()
     private val awake = VdAwake(::pokeDisplay)
     private var userActivity: Pair<Any, Method>? = null
     private var userActivityResolved = false
@@ -311,9 +507,10 @@ object MinisAgentDisplayManager {
      * Creation tries the trusted flag set first and retries exactly once
      * without the trust bits when the framework refuses them with a
      * [SecurityException] (Mika `retryWithoutTrust`: only a permission
-     * denial is worth retrying; other failures are rethrown). If the
-     * untrusted PUBLIC display is refused as well the result is
-     * [VdCreateResult.Failed] with code `CREATION_FAILED`.
+     * denial is worth retrying; other failures are rethrown). M1: when even
+     * that fails (`CREATION_FAILED`), the call automatically falls back to
+     * the Shizuku shell host ([MinisShellClient.createDisplay], display
+     * owned by uid 2000) — see [shellFallback] and docs/virtual-display-M1.md.
      */
     fun create(
         context: Context,
@@ -348,15 +545,22 @@ object MinisAgentDisplayManager {
             try {
                 dm.createVirtualDisplay(name, w, h, d, reader.surface, flags)
             } catch (e: Throwable) {
-                reader.close()
-                return VdCreateResult.Failed("CREATION_FAILED",
-                    "createVirtualDisplay(${w}x$h dpi=$d, flags=0x${flags.toString(16)}) was refused " +
-                        "(${e.message}). An untrusted PUBLIC display may be rejected by the framework on " +
-                        "this ROM; the M1 Shizuku shell-host route (agent display owned by uid 2000) covers it.")
+                // M1: the framework refused even an untrusted PUBLIC display in
+                // the app process (the likely outcome on stock framework — a
+                // plain app may only create PRIVATE displays). Hand the same
+                // ImageReader surface to the Shizuku shell host, which owns
+                // the display with shell privilege.
+                // P0 review fix: broad catch (Throwable, not just
+                // SecurityException) so an unexpected retry failure degrades
+                // to the shell fallback instead of escaping the method.
+                return shellFallback(context, name, reader, w, h, d,
+                    "trusted: ${se.message}; untrusted: ${e.javaClass.simpleName}: ${e.message}")
             }
         } catch (e: Throwable) {
-            reader.close()
-            return VdCreateResult.Failed("CREATION_FAILED", "${e.javaClass.simpleName}: ${e.message ?: "unknown"}")
+            // Non-security failure in-process (OOM, …) — still try the shell
+            // host; it is the documented M1 path for any CREATION_FAILED.
+            return shellFallback(context, name, reader, w, h, d,
+                "${e.javaClass.simpleName}: ${e.message ?: "unknown"}")
         }
 
         val thread = HandlerThread("$name").apply { start() }
@@ -371,8 +575,53 @@ object MinisAgentDisplayManager {
         return VdCreateResult.Ok(display)
     }
 
-    fun get(displayId: Int): MinisAgentDisplay? = synchronized(lock) { active[displayId] }
-    fun list(): List<MinisAgentDisplay> = synchronized(lock) { active.values.toList() }
+    /**
+     * M1 fallback, entered from [create] on ANY in-process CREATION_FAILED.
+     *
+     * The app still owns the ImageReader (frames keep landing in-process);
+     * only the display owner moves to the Shizuku shell host (uid 2000),
+     * which is the only identity that can create PUBLIC + TRUSTED displays
+     * and start apps into secondary users. The resulting
+     * [MinisShellAgentDisplay] is registered like an in-process one, so
+     * `android-vd-cli` (create/shot/release) is transparent to the switch.
+     *
+     * Fails (code `SHELL_CREATION_FAILED`) when the host is unreachable
+     * (Shizuku not READY / helper too old) or the host itself refuses —
+     * in which case the reader is closed and the caller sees the reason
+     * from [MinisShellClient.lastError].
+     */
+    private fun shellFallback(
+        context: Context,
+        name: String,
+        reader: ImageReader,
+        w: Int,
+        h: Int,
+        d: Int,
+        inProcessError: String,
+    ): VdCreateResult {
+        AppLogger.info(TAG, "in-process creation failed ($inProcessError); trying Shizuku shell host")
+        val shellId = MinisShellClient.createDisplay(reader.surface, w, h, d)
+        if (shellId < 0) {
+            reader.close()
+            return VdCreateResult.Failed(
+                "SHELL_CREATION_FAILED",
+                "In-process createVirtualDisplay was refused ($inProcessError) and the Shizuku shell host " +
+                    "could not create the display either: ${MinisShellClient.lastError() ?: "unknown"}. " +
+                    "Prerequisites: Shizuku installed + started (wireless/USB debugging, shell uid 2000) " +
+                    "+ Minis authorized in Shizuku — see docs/virtual-display-M1.md.",
+            )
+        }
+        val display = MinisShellAgentDisplay(context, reader, shellId, name, w, h, d)
+        // Keep-awake for a shell-owned OWN_DISPLAY_GROUP display lives INSIDE
+        // the host process (its own DisplayAwake port); the local one would
+        // report user activity for a display it does not own.
+        synchronized(lock) { active[shellId] = display }
+        AppLogger.info(TAG, "shell host created display $shellId for $name (in-process: $inProcessError)")
+        return VdCreateResult.Ok(display)
+    }
+
+    fun get(displayId: Int): AgentDisplayApi? = synchronized(lock) { active[displayId] }
+    fun list(): List<AgentDisplayApi> = synchronized(lock) { active.values.toList() }
 
     /** Destroy one display and stop its keep-awake. True if it was tracked. */
     fun release(displayId: Int): Boolean {
@@ -383,7 +632,7 @@ object MinisAgentDisplayManager {
         return true
     }
 
-    /** Destroy every in-process display (e.g. on application teardown). */
+    /** Destroy every display (in-process and shell-owned), e.g. on application teardown. */
     fun releaseAll() {
         synchronized(lock) {
             active.values.toList().also { active.clear() }

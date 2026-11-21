@@ -26,3 +26,12 @@
 # NOTE FOR VERIFICATION: debug builds don't minify, so this bug is invisible
 # there. Any change here must be checked against an assembleRelease APK.
 -keep class io.codeconcept.realtimecutvadlibrary.** { *; }
+
+# [T-android-virtual-display-m1] M1 Shizuku shell-host display service:
+# MinisShellHostService is instantiated BY CLASS NAME (reflection) inside
+# Shizuku's privileged app_process helper, and the generated IMinisShell
+# AIDL binder is what the helper passes to the app. R8 must neither rename
+# nor shrink either of them, or the host fails to start on release builds.
+-keep class com.openminis.app.shizuku.MinisShellHostService { *; }
+-keep class com.openminis.app.shizuku.IMinisShell* { *; }
+-keep class com.openminis.app.shizuku.ShellContext { *; }
