@@ -56,6 +56,13 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 
 /**
+ * Live-preview short side, ported from Mika `AgentDisplay.PREVIEW_SHORT_SIDE`.
+ * File-level so both owners ([MinisAgentDisplay] and [MinisShellAgentDisplay])
+ * share the constant.
+ */
+private const val PREVIEW_SHORT_SIDE = 360
+
+/**
  * What the app sees from an agent virtual display, no matter who owns it:
  * the P0 in-process owner ([MinisAgentDisplay], uid = app) or the M1 Shizuku
  * shell host ([MinisShellAgentDisplay], uid 2000). `android-vd-cli` talks
@@ -76,6 +83,8 @@ interface AgentDisplayApi : AutoCloseable {
     val width: Int
     val height: Int
     val hasFrameNow: Boolean
+    /** Live preview frames (short side ≤ 360px, black frames published as null). */
+    val frames: StateFlow<Bitmap?>
     fun latestFramePng(): ByteArray?
     fun latestFrameBitmap(): Bitmap?
     fun lastFrameAt(): Long?
@@ -154,7 +163,7 @@ class MinisAgentDisplay internal constructor(
      * back to their placeholder instead).
      */
     private val _frames = MutableStateFlow<Bitmap?>(null)
-    val frames: StateFlow<Bitmap?> = _frames.asStateFlow()
+    override val frames: StateFlow<Bitmap?> = _frames.asStateFlow()
 
     private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
 
@@ -384,6 +393,9 @@ class MinisShellAgentDisplay internal constructor(
 
     private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
 
+    private val _frames = MutableStateFlow<Bitmap?>(null)
+    override val frames: StateFlow<Bitmap?> = _frames.asStateFlow()
+
     private val process = Runnable {
         pending = false
         lastProcessedAt = SystemClock.uptimeMillis()
@@ -425,6 +437,10 @@ class MinisShellAgentDisplay internal constructor(
                 hasFrame = true
                 frameTimestampNanos = image.timestamp
                 frameGeometry = capturedGeometry
+                // Black-frame guard mirrors P0: near-black frames publish null.
+                _frames.value = if (VdFrameMath.isBlack(bmp)) null
+                    else vdUprightFrame(bmp, capturedGeometry,
+                        maxWidth = capturedGeometry.previewWidth(PREVIEW_SHORT_SIDE), paint)
             }
         } finally {
             image.close()
@@ -471,6 +487,7 @@ class MinisShellAgentDisplay internal constructor(
                 fullFrame?.recycle()
                 fullFrame = null
                 hasFrame = false
+                _frames.value = null
             }
         }
         thread.quitSafely()

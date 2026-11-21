@@ -80,7 +80,7 @@ object MinisShellClient {
      */
     fun isUsable(): Boolean {
         if (shell != null) return true
-        val snap = ShizukuManager.snapshot().state
+        val snap = ShizukuManager.snapshot.value.state
         if (snap != ShizukuManager.State.READY) {
             lastError = "Shizuku not READY (state=$snap) — start it in the Shizuku app (wireless/USB debugging = shell uid 2000)"
             return false
@@ -102,7 +102,7 @@ object MinisShellClient {
             return@synchronized it
         }
         if (!ShizukuManager.isReady()) {
-            lastError = "Shizuku not READY (state=${ShizukuManager.snapshot().state})"
+            lastError = "Shizuku not READY (state=${ShizukuManager.snapshot.value.state})"
             return@synchronized null
         }
         // Shizuku < v12 has no user-service support.
@@ -151,9 +151,10 @@ object MinisShellClient {
         val delivered = latch.await(timeoutMs, TimeUnit.MILLISECONDS)
         val result = shell
         if (result == null) {
-            lastError = if (delivered) "binder received but not an IMinisShell"
-            else "timed out (${timeoutMs}ms) waiting for the shell host to come up"
-            AppLogger.warning(TAG, lastError)
+            val msg = if (delivered) "binder received but not an IMinisShell"
+                else "timed out (${timeoutMs}ms) waiting for the shell host to come up"
+            lastError = msg
+            AppLogger.warning(TAG, msg)
             return@synchronized null
         }
         started = true
