@@ -1,6 +1,7 @@
 package com.openminis.app.sandbox.offload
 
 import android.content.Context
+import android.os.SystemClock
 import com.openminis.app.accessibility.MinisAccessibilityService
 import com.openminis.app.display.AgentDisplayApi
 import com.openminis.app.display.MinisAgentDisplayManager
@@ -46,6 +47,11 @@ class VdOffloadHandler(private val context: Context) : NativeOffloadHandler {
         private const val VAR_MINIS_ATTACHMENTS = "/var/minis/attachments"
         private const val VD_SHOT_SUBDIR = "screenshots"
 
+        /** Idle-frame threshold for the pre-create sweep (see [sweepIdleDisplays]). */
+        private const val IDLE_FRAME_LIMIT_MS = 10 * 60_000L
+        /** More than this many FRESH displays ⇒ sweep them all before creating. */
+        private const val MAX_IDLE_DISPLAYS = 2
+
         private const val HELP = """android-vd-cli — P0 in-process virtual display.
 
 Builds a physically-invisible virtual display inside the Minis app process
@@ -66,6 +72,11 @@ Subcommands:
                    falls back to the Shizuku shell host (display owned by
                    uid 2000 — docs/virtual-display-M1.md). SHELL_CREATION_
                    FAILED means both owners refused — check Shizuku.
+                   Leak guard: before creating, idle displays are released
+                   automatically (never produced a frame, or last frame
+                   >10 min old); if >2 idle displays survive, all are
+                   released first — see the `released` array in the
+                   envelope.
   list             Active in-process displays (+ keep-awake state, last
                    frame) and the display ids visible to the a11y service.
   shot <displayId> PNG of the latest frame →
@@ -76,10 +87,16 @@ Subcommands:
                    path is broken on this ROM (e.g. emulators after the
                    trusted downgrade).
   launch <displayId> --user <u> <component>
-                   Launch <component> onto <displayId> as user <u> via
-                   Shizuku: `am start --user <u> --display <displayId>
-                   -n <component>`. Needs Shizuku READY
-                   (`android-shizuku-cli service status`).
+                   Move <component> onto <displayId> as user <u> via
+                   Shizuku: `am force-stop --user <u> <package>` FIRST,
+                   then `am start --user <u> --display <displayId>
+                   -n <component>`. The force-stop is load-bearing: when
+                   the app is already running on the main display, a bare
+                   `am start` only reports "delivered to currently
+                   running top-most instance" (exit 0, never moves it) or
+                   fails outright — killing the target's own instance is
+                   how it actually lands on the virtual display. Needs
+                   Shizuku READY (`android-shizuku-cli service status`).
   tap <displayId> <x> <y>
                    Tap on the display via Shizuku: `input -d <displayId>
                    tap <x> <y>`.
@@ -142,6 +159,10 @@ Common flags: --compact / -q / --quiet.
     // ── create / list / release ────────────────────────────────────────────
 
     private fun create(args: OffloadArgs): NativeOffloadResult {
+        // Leak guard (field-measured: 7 consecutive attempts left displays
+        // 194–200 unreleased): sweep idle displays BEFORE adding another
+        // framebuffer. Idle = no active app ≈ no recent frame.
+        val released = sweepIdleDisplays()
         val result = MinisAgentDisplayManager.create(
             context,
             width = args.getInt("w", "width"),
@@ -160,12 +181,46 @@ Common flags: --compact / -q / --quiet.
                         .put("dpi", d.dpi)
                         .put("trusted", d.trusted)
                         .put("flags", "0x" + d.flags.toString(16))
+                        .put("released", JSONArray(released))
                         .put("hint", "launch apps onto it: $TOOL launch ${d.displayId} --user 999 <component>"),
                     args,
                 )
             }
             is VdCreateResult.Failed -> errEnvelope(result.code, result.message, args)
         }
+    }
+
+    /**
+     * Pre-create sweep: release in-process displays with no active app,
+     * conservatively judged by frame freshness — [AgentDisplayApi.lastFrameAt]
+     * is the producer's monotonic timestamp in NANOseconds, so compare it
+     * against [SystemClock.elapsedRealtimeNanos], not wall-clock millis.
+     * A display is idle when it never produced a frame (null) or its last
+     * frame is > [IDLE_FRAME_LIMIT_MS] old. If MORE THAN two fresh
+     * displays survive (framebuffer accumulation), release them all before
+     * the new one is created.
+     */
+    private fun sweepIdleDisplays(): List<Int> {
+        val nowNanos = SystemClock.elapsedRealtimeNanos()
+        val released = mutableListOf<Int>()
+        val survivors = MinisAgentDisplayManager.list()
+            .filter { d ->
+                val t = d.lastFrameAt()
+                val idle = t == null || nowNanos - t > IDLE_FRAME_LIMIT_MS * 1_000_000L
+                if (idle) {
+                    if (MinisAgentDisplayManager.release(d.displayId)) released += d.displayId
+                    false
+                } else true
+            }
+        if (survivors.size > MAX_IDLE_DISPLAYS) {
+            // The survivors are the ones WITH recent frames; holding >2 of
+            // them is the accumulation case — drop them all, new create
+            // follows.
+            survivors.forEach { d ->
+                if (MinisAgentDisplayManager.release(d.displayId)) released += d.displayId
+            }
+        }
+        return released
     }
 
     private fun list(args: OffloadArgs): NativeOffloadResult {
@@ -284,6 +339,28 @@ Common flags: --compact / -q / --quiet.
             ?: return errEnvelope("VD_NOT_FOUND", "no in-process virtual display $id; `create` it first " +
                 "(the target display must exist before launching onto it)", args)
 
+        // Field bug: when the app is already running on the main display
+        // (display 0), a bare `am start` exits 0 with only "delivered to
+        // currently running top-most instance" — the task NEVER moves to
+        // the virtual display (or the start fails). Force-stop the
+        // component's own package first (scoped to --user; it is being
+        // killed on purpose, it has to restart onto this display), then
+        // start it into the target display.
+        val pkg = component.substringBefore('/')
+
+        val stop = shizukuRun(listOf("am", "force-stop", "--user", user, pkg))
+        if (stop == null) {
+            return errEnvelope("SHIZUKU_NOT_READY",
+                "Shizuku is not READY; `launch` shells out `am force-stop --user $user $pkg` " +
+                    "then `am start --user $user --display $id -n $component` with Shizuku " +
+                    "privilege. Check `android-shizuku-cli service status`.", args)
+        }
+        if (stop.exitCode != 0) {
+            // Proceeding would just reproduce the original symptom (the old
+            // instance is still on display 0 and am start won't move it).
+            return errEnvelope("OPERATION_FAILED", "am force-stop failed: ${stop.combined.take(300)}", args)
+        }
+
         val r = shizukuRun(
             listOf("am", "start", "--user", user, "--display", id.toString(), "-n", component),
             timeoutMs = 15_000,
@@ -299,6 +376,8 @@ Common flags: --compact / -q / --quiet.
                     .put("displayId", id)
                     .put("user", user)
                     .put("component", component)
+                    .put("package", pkg)
+                    .put("forceStopped", true)
                     .put("output", r.stdout.trim().take(400)),
                 args,
             )
