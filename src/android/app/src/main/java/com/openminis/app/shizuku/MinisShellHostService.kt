@@ -65,7 +65,9 @@ import java.util.concurrent.atomic.AtomicReference
  * Every call is uid-checked against [allowedUid] (the Minis app uid);
  * calls that bypass Minis (e.g. from other shell processes) are refused.
  */
-@Keep
+// No class-level @Keep: androidx Keep is not applicable to classes, and the
+// release retention already comes from the proguard-rules.pro rule
+// `-keep class com.openminis.app.shizuku.MinisShellHostService { *; }`.
 class MinisShellHostService : IMinisShell.Stub {
 
     private val delegate: MinisShellDisplay
