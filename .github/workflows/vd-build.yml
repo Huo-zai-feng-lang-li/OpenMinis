@@ -73,7 +73,12 @@ jobs:
         run: |
           echo "sdk.dir=$ANDROID_HOME" > src/android/local.properties
           cd src/android
-          ./gradlew --no-daemon :app:assembleDebug
+          # perf variant: the debug variant minus android:debuggable. A
+          # debuggable app is run interpreter+JIT by ART (it refuses AOT),
+          # so keyboard/IME pop and UI transitions feel laggy vs the release
+          # main app. perf keeps DEV_TOOLS + the .vd suffix + the same CI
+          # signing key (in-place update), but is AOT-compilable and fast.
+          ./gradlew --no-daemon :app:assemblePerf
 
       - name: Collect APKs
         run: |
@@ -82,19 +87,19 @@ jobs:
           ls -la dist/
 
 
-      - name: Publish release (in-app update protocol, tag 1.20)
+      - name: Publish release (in-app update protocol, tag 1.21)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           apk=$(find dist -name '*.apk' | head -1)
-          out="MinisApp-1.20-build51-arm64-v8a.apk"
+          out="MinisApp-1.21-build52-arm64-v8a.apk"
           cp "$apk" "$out"
-          if gh release view 1.20 >/dev/null 2>&1; then
-            gh release upload 1.20 "$out" --clobber
+          if gh release view 1.21 >/dev/null 2>&1; then
+            gh release upload 1.21 "$out" --clobber
           else
-            gh release create 1.20 \
-              --title "Minis 1.20 (build 51, island-crash fix + capsule UX)" \
-              --notes "Fixes: (1) the agent foreground-service notification was crash-looping the app on cold start — the island card's ProgressBar.setIndeterminate(int) RemoteViews action doesn't exist on API 36; removed it (the layout's indeterminate flag already covers it) and wrapped the whole custom-view build in a crash-safe fallback to the default layout. Notifications/Dynamic Island now show again without killing the app. (2) Capsule live preview: default 3/4 x 2/5 screen, tap the frame to expand (4/5 x 3/5, moved up), drag now follows the finger 1:1 (horizontal was inverted), 44dp tappable buttons. (3) Virtual-display settings entry removed from the human menu (page stays for the agent / minis://settings/virtual_display); Virtual Display permission card in Settings -> Permissions. In-place update over 1.18 (build 49)." "$out"
+            gh release create 1.21 \
+              --title "Minis 1.21 (build 52, AOT-fast perf build)" \
+              --notes "Now ships the `perf` variant (debug minus android:debuggable): ART AOT-compiles it instead of running it interpreter+JIT, so keyboard/IME pop and UI transitions are as snappy as the release main app. Same .vd package id + CI signing key (in-place update over 1.20 build 51); DEV_TOOLS kept. Includes the 1.20 island-crash fix + capsule UX." "$out"
           fi
 
       - uses: actions/upload-artifact@v4
