@@ -1494,7 +1494,7 @@ class AgentForegroundService : Service() {
         // views (e.g. MIUI's 超灵动岛 chrome, which draws the
         // notification's own shell) fall back to the default layout; the
         // accent below is the only knob that still reaches that path.
-        val islandViews = android.app.RemoteViews(packageName, R.layout.notification_agent_island)
+        val islandViews = android.widget.RemoteViews(packageName, R.layout.notification_agent_island)
         islandViews.setImageViewResource(R.id.notification_island_icon, smallIcon)
         islandViews.setTextViewText(R.id.notification_island_title, titleText)
         islandViews.setTextViewText(R.id.notification_island_subtitle, collapsedText)
