@@ -88,6 +88,8 @@ android {
     buildTypes {
         getByName("debug") {
             buildConfigField("boolean", "DEV_TOOLS", "true")
+            // Parallel-install package id (coexists with the installed app; drop on merge to main)
+            applicationIdSuffix = ".vd"
         }
         // `perf`: the debug variant minus android:debuggable. ART refuses to
         // AOT-compile a debuggable app (`cmd package compile -m speed`
