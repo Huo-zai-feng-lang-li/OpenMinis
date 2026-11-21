@@ -1508,7 +1508,26 @@ class AgentForegroundService : Service() {
             islandViews.setInt(R.id.notification_island_stop, "setVisibility", android.view.View.GONE)
         } else {
             islandViews.setInt(R.id.notification_island_stop, "setVisibility", android.view.View.VISIBLE)
-            islandViews.setPendingIntent(R.id.notification_island_stop, stopPendingIntent)
+            // The click-binding method was renamed between platform surfaces
+            // (setPendingIntent -> setOnClickPendingIntent in the API 36
+            // compile SDK). Resolve both so the capsule works on older
+            // devices too; neither existing is a no-op (the default-layout
+            // Stop action below remains as the fallback either way).
+            runCatching {
+                islandViews.javaClass.getMethod(
+                    "setOnClickPendingIntent",
+                    Int::class.javaPrimitiveType,
+                    android.app.PendingIntent::class.java,
+                ).invoke(islandViews, R.id.notification_island_stop, stopPendingIntent)
+            }.getOrElse {
+                runCatching {
+                    islandViews.javaClass.getMethod(
+                        "setPendingIntent",
+                        Int::class.javaPrimitiveType,
+                        android.app.PendingIntent::class.java,
+                    ).invoke(islandViews, R.id.notification_island_stop, stopPendingIntent)
+                }
+            }
         }
         builder.setCustomContentView(islandViews)
         builder.setCustomBigContentView(islandViews)
