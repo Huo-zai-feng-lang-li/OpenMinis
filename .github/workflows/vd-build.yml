@@ -58,6 +58,15 @@ jobs:
           find src/android/app/build/outputs/apk -name '*.apk' -exec cp {} dist/ \;
           ls -la dist/
 
+
+      - name: Publish to release (public, no-auth download)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          apk=$(find dist -name '*.apk' | head -1)
+          gh release create "vd-debug-latest" --title "Minis VD debug build" --notes "Auto-updated" --clobber "openminis-vd-debug.apk" "$apk" || \
+          gh release create "vd-debug-latest" --title "Minis VD debug build" --clobber "openminis-vd-debug.apk" "$apk"
+
       - uses: actions/upload-artifact@v4
         with:
           name: openminis-vd-debug
