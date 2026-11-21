@@ -390,4 +390,3 @@ private fun CapsuleButton(
 }
 
 private const val STALE_AFTER_NANOS = 3_000_000_000L // 3s
-l STALE_AFTER_NANOS = 3_000_000_000L // 3s
