@@ -172,6 +172,9 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+        // M1 Shizuku shell-host display service (src/main/aidl/com/openminis/
+        // app/shizuku/IMinisShell.aidl).
+        aidl = true
     }
 
     androidResources {

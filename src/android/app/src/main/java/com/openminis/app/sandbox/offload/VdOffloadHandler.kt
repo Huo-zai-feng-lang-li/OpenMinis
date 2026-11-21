@@ -2,6 +2,7 @@ package com.openminis.app.sandbox.offload
 
 import android.content.Context
 import com.openminis.app.accessibility.MinisAccessibilityService
+import com.openminis.app.display.AgentDisplayApi
 import com.openminis.app.display.MinisAgentDisplayManager
 import com.openminis.app.display.VdCreateResult
 import com.openminis.app.logging.AppLogger
@@ -26,9 +27,9 @@ import org.json.JSONObject
  * Shizuku `input -d`. Reading the UI tree per display is the a11y side:
  * `android-a11y-cli ui displays | dump | find | info --display N`.
  *
- * P0 scope is the minimal closed loop documented in
- * `docs/virtual-display-P0.md`; the Shizuku shell-host display owner
- * (trusted displays, cross-user a11y guarantees) is the M1 follow-up.
+ * P0 verification checklist (details: docs/virtual-display-P0.md). The
+ * Shizuku shell-host display owner (trusted displays, uid 2000) is the M1
+ * fallback wired into `create` — docs/virtual-display-M1.md.
  */
 class VdOffloadHandler(private val context: Context) : NativeOffloadHandler {
 
@@ -58,11 +59,13 @@ Usage:
 Subcommands:
   create [--w N] [--h N] [--dpi N]
                    Create a virtual display. Defaults to the main display's
-                   physical size/density. Tries the trusted flag set first
-                   and downgrades once when the framework refuses it;
-                   CREATION_FAILED means even the untrusted PUBLIC display
-                   was refused — that ROM needs the M1 Shizuku shell-host
-                   route (agent display owned by uid 2000).
+                   physical size/density. Tries the in-process trusted flag
+                   set first and downgrades once when the framework refuses
+                   it; if even the untrusted PUBLIC display is refused
+                   (the common outcome for a plain app uid), it AUTOMATICALLY
+                   falls back to the Shizuku shell host (display owned by
+                   uid 2000 — docs/virtual-display-M1.md). SHELL_CREATION_
+                   FAILED means both owners refused — check Shizuku.
   list             Active in-process displays (+ keep-awake state, last
                    frame) and the display ids visible to the a11y service.
   shot <displayId> PNG of the latest frame →
@@ -190,7 +193,7 @@ Common flags: --compact / -q / --quiet.
         return okEnvelope(JSONObject().put("displayId", id).put("released", true), args)
     }
 
-    private fun displayToJson(d: com.openminis.app.display.MinisAgentDisplay): JSONObject = JSONObject()
+    private fun displayToJson(d: AgentDisplayApi): JSONObject = JSONObject()
         .put("displayId", d.displayId)
         .put("name", d.name)
         .put("width", d.bufferWidth)
