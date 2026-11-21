@@ -105,6 +105,9 @@ fun SettingsScreen(
     // [T-mcp-integration-android] MCP Integrations page, listed directly below
     // Memory. Default no-op for callers that haven't wired the route yet.
     onMcpClick: () -> Unit = {},
+    // [T-android-virtual-display] Virtual display page (in-process agent
+    // displays + floating capsule preview). Android-only.
+    onVirtualDisplayClick: () -> Unit = {},
     // [T-soul-md] Soul settings page lives between Skills and Memory in the
     // Agent Runtime section; default no-op for callers that haven't wired
     // the route yet.
@@ -269,6 +272,20 @@ fun SettingsScreen(
                     title = stringResource(R.string.settings_env_vars),
                     subtitle = stringResource(R.string.settings_env_vars_subtitle),
                     onClick = onEnvVarsClick,
+                    showDivider = false,
+                )
+            }
+
+            // [T-android-virtual-display] Android-only agent-display surface:
+            // invisible virtual displays with a floating capsule live
+            // preview. Below the Agent Runtime section, above Storage.
+            SettingsSection(title = stringResource(R.string.vd_settings_title)) {
+                SettingsItem(
+                    icon = Icons.Outlined.Devices,
+                    iconColor = Color(0xFFAF52DE),
+                    title = stringResource(R.string.vd_settings_title),
+                    subtitle = stringResource(R.string.vd_settings_desc),
+                    onClick = onVirtualDisplayClick,
                     showDivider = false,
                 )
             }

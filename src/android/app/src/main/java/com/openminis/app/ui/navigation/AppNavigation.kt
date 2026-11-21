@@ -197,6 +197,8 @@ object Routes {
     const val SYSTEM_PERMISSIONS = "system_permissions"
     const val USAGE_STATS = "usage_stats"
     const val LOGS = "logs"
+    // [T-android-virtual-display] in-process virtual displays + capsule preview.
+    const val VIRTUAL_DISPLAY = "virtual_display"
     const val LOG_DETAIL = "log_detail/{fileName}"
     /** [T-config-readable] Logs → Config Changes → one record. */
     const val CONFIG_AUDIT_DETAIL = "config_audit_detail/{auditId}"
@@ -664,6 +666,8 @@ fun AppNavigation(
                 onAgentsClick = { navController.safeNavigate(Routes.AGENTS) },
                 onAgentToolsClick = { navController.safeNavigate(Routes.AGENT_TOOLS) },
                 onMcpClick = { navController.safeNavigate(Routes.MCP) },
+                // [T-android-virtual-display] Android-only virtual display page.
+                onVirtualDisplayClick = { navController.safeNavigate(Routes.VIRTUAL_DISPLAY) },
                 onSoulClick = { navController.safeNavigate(Routes.SOUL) },
                 onPermissionsClick = { navController.safeNavigate(Routes.PERMISSIONS) },
                 onUsageClick = { navController.safeNavigate(Routes.USAGE_STATS) },
@@ -1418,6 +1422,14 @@ fun AppNavigation(
                     },
                 )
             }
+        }
+
+        // [T-android-virtual-display] in-process virtual display management +
+        // live capsule preview.
+        composable(Routes.VIRTUAL_DISPLAY) {
+            com.openminis.app.ui.settings.VirtualDisplayScreen(
+                onBack = { navController.safePopBackStack() },
+            )
         }
 
         // [T-mcp-integration-android] MCP Integrations management screen.

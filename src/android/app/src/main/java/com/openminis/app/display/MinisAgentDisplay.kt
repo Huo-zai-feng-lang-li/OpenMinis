@@ -12,14 +12,19 @@ import android.media.ImageReader
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.Looper
 import android.os.SystemClock
 import android.view.Display
 import android.view.Surface
 import com.openminis.app.logging.AppLogger
 import java.io.ByteArrayOutputStream
 import java.lang.reflect.Method
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /*
  * Apache-2.0 attribution (Mika port):
@@ -43,6 +48,10 @@ import java.util.concurrent.TimeUnit
  * downgraded once; if even the untrusted PUBLIC display is refused the
  * creation fails and reports CREATION_FAILED (the M1 Shizuku shell-host
  * route is the documented next step).
+ *
+ * The live-preview stream (`frames`, short side ≤360 px, ≤10 fps, black
+ * frames publish null) is re-ported from Mika `AgentDisplay._frames` /
+ * `previewWidth` (Apache-2.0) for the in-app capsule overlay.
  */
 
 /** Outcome of [MinisAgentDisplayManager.create]. */
@@ -104,6 +113,18 @@ class MinisAgentDisplay internal constructor(
     @Volatile
     private var released = false
 
+    /**
+     * Live preview stream, re-ported from Mika `AgentDisplay.frames`
+     * (Apache-2.0): a StateFlow of upright frames scaled to short side
+     * ≤ [PREVIEW_SHORT_SIDE] px, refreshed at most as fast as the frame
+     * pipeline runs (≤10 fps). Black frames are published as null
+     * (black-frame guard: secure capture paths and GPU failures yield
+     * near-black frames; showing them is pure noise — consumers fall
+     * back to their placeholder instead).
+     */
+    private val _frames = MutableStateFlow<Bitmap?>(null)
+    val frames: StateFlow<Bitmap?> = _frames.asStateFlow()
+
     private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
 
     private val process = Runnable {
@@ -153,6 +174,13 @@ class MinisAgentDisplay internal constructor(
                 // must be the producer's timestamp, not the copy's.
                 frameTimestampNanos = image.timestamp
                 frameGeometry = capturedGeometry
+                // Publish the preview copy (Mika `AgentDisplay.frames`): upright frame with the
+                // short side ≤ PREVIEW_SHORT_SIDE. Black frames (black-frame guard) publish
+                // null — showing them would be pure noise; consumers fall back to their
+                // placeholder.
+                _frames.value = if (VdFrameMath.isBlack(bmp)) null
+                    else vdUprightFrame(bmp, capturedGeometry,
+                        maxWidth = capturedGeometry.previewWidth(PREVIEW_SHORT_SIDE), paint)
             }
         } finally {
             image.close()
@@ -246,6 +274,7 @@ class MinisAgentDisplay internal constructor(
                 hasFrame = false
             }
         }
+        _frames.value = null
         thread.quitSafely()
         runCatching { virtualDisplay.release() }
             .onFailure { AppLogger.warning(TAG, "virtualDisplay.release($displayId) failed: ${it.message}") }
@@ -256,6 +285,8 @@ class MinisAgentDisplay internal constructor(
     private companion object {
         const val TAG = "MinisAgentDisplay"
         const val FRAME_INTERVAL_MS = 100L
+        /** Live-preview short side, ported from Mika `AgentDisplay.PREVIEW_SHORT_SIDE`. */
+        const val PREVIEW_SHORT_SIDE = 360
     }
 }
 
@@ -368,11 +399,36 @@ object MinisAgentDisplayManager {
         if (awakeNeeded(display.flags, display.displayId)) awake.start(display.displayId)
         synchronized(lock) { active[display.displayId] = display }
         AppLogger.info(TAG, "created $name: displayId=${display.displayId} trusted=$trusted flags=0x${flags.toString(16)}")
+        notifyChanged()
         return VdCreateResult.Ok(display)
     }
 
     fun get(displayId: Int): MinisAgentDisplay? = synchronized(lock) { active[displayId] }
     fun list(): List<MinisAgentDisplay> = synchronized(lock) { active.values.toList() }
+
+    /**
+     * Main-thread notifications after a display was created or released —
+     * the capsule overlay (com.openminis.app.capsule.MinisCapsule) uses this
+     * to mount/unmount itself lazily. Kept on the manager rather than in the
+     * display object so the frame pipeline itself stays untouched.
+     */
+    private val changeListeners = CopyOnWriteArrayList<() -> Unit>()
+
+    fun addChangeListener(listener: () -> Unit) {
+        changeListeners.add(listener)
+    }
+
+    fun removeChangeListener(listener: () -> Unit) {
+        changeListeners.remove(listener)
+    }
+
+    private fun notifyChanged() {
+        val listeners = changeListeners.toList()
+        if (listeners.isEmpty()) return
+        Handler(Looper.getMainLooper()).post {
+            for (l in listeners) runCatching { l() }
+        }
+    }
 
     /** Destroy one display and stop its keep-awake. True if it was tracked. */
     fun release(displayId: Int): Boolean {
@@ -380,15 +436,20 @@ object MinisAgentDisplayManager {
         awake.stop(displayId)
         d.release()
         AppLogger.info(TAG, "released display $displayId")
+        notifyChanged()
         return true
     }
 
     /** Destroy every in-process display (e.g. on application teardown). */
     fun releaseAll() {
-        synchronized(lock) {
-            active.values.toList().also { active.clear() }
-                .forEach { awake.stop(it.displayId); it.release() }
+        val removed = synchronized(lock) {
+            val v = active.values.toList()
+            active.clear()
+            v
         }
+        if (removed.isEmpty()) return
+        removed.forEach { awake.stop(it.displayId); it.release() }
+        notifyChanged()
     }
 
     // ── keep-awake (Mika DisplayAwake semantics) ─────────────────────────────
@@ -565,6 +626,16 @@ private data class VdFrameGeometry(val bufferWidth: Int, val bufferHeight: Int, 
     private val sideways get() = rotation == 1 || rotation == 3
     val width: Int get() = if (sideways) bufferHeight else bufferWidth
     val height: Int get() = if (sideways) bufferWidth else bufferHeight
+
+    /**
+     * Logical width that keeps the shorter side at ≤ [shortSide] px (Mika
+     * `DisplayFrameGeometry.previewWidth`): the upright frame is scaled to
+     * this width for live previews.
+     */
+    fun previewWidth(shortSide: Int): Int {
+        val s = minOf(width, height)
+        return if (s <= shortSide || s <= 0) width else ((width.toLong() * shortSide) / s).toInt().coerceAtLeast(1)
+    }
 }
 
 /**

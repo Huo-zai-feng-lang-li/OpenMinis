@@ -14,6 +14,7 @@ import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.annotation.RequiresApi
+import com.openminis.app.capsule.MinisCapsule
 import com.openminis.app.logging.AppLogger
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CopyOnWriteArrayList
@@ -77,6 +78,10 @@ class MinisAccessibilityService : AccessibilityService() {
         } catch (t: Throwable) {
             AppLogger.warning(TAG, "markGranted failed: ${t.message}")
         }
+        // Virtual-display capsule overlay (TYPE_ACCESSIBILITY_OVERLAY): re-mount
+        // after an OEM kill + re-bind; no-ops when no display exists.
+        runCatching { MinisCapsule.onServiceConnected(this) }
+            .onFailure { AppLogger.warning(TAG, "capsule mount failed: ${it.message}") }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -105,6 +110,9 @@ class MinisAccessibilityService : AccessibilityService() {
         eventRing.clear()
         nodeRegistry.clear()
         eventListeners.clear()
+        // The overlay windows die with this service's token; tell the
+        // capsule controller so it can re-mount on the next bind.
+        runCatching { MinisCapsule.onServiceDestroyed() }
         AppLogger.info(TAG, "service destroyed")
     }
 
