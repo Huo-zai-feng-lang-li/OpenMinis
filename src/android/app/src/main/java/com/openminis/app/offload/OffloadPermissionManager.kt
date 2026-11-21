@@ -89,6 +89,7 @@ object OffloadPermissionManager {
         // is already authorized.
         ToolPermissionInfo("a11y_cli", "android-a11y-cli", PermissionCategory.INTEGRATIONS, PermissionLevel.NOT_ALLOWED),
         ToolPermissionInfo("shizuku_cli", "android-shizuku-cli", PermissionCategory.INTEGRATIONS, PermissionLevel.NOT_ALLOWED),
+        ToolPermissionInfo("display_cli", "android-vd-cli", PermissionCategory.INTEGRATIONS, PermissionLevel.NOT_ALLOWED),
     )
 
     /** Stable session-id used by NativeOffloadHandlers when calling

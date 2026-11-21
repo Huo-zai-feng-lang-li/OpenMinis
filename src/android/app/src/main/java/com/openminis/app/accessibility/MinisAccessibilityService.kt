@@ -143,7 +143,8 @@ class MinisAccessibilityService : AccessibilityService() {
         val ids = LinkedHashSet<Int>()
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                ids.addAll(windowsOnAllDisplays.keys.toList())
+                val all = windowsOnAllDisplays // SparseArray<List<...>> has no .keys
+                for (i in 0 until all.size()) ids.add(all.keyAt(i))
             } else {
                 if (windows != null) ids.add(Display.DEFAULT_DISPLAY)
             }
@@ -220,10 +221,13 @@ class MinisAccessibilityService : AccessibilityService() {
                     "title" to (w.title?.toString() ?: ""),
                     "focused" to w.isFocused,
                     "active" to w.isActive,
-                    // P0 virtual display: expose which display a window belongs to so
-                    // the CLI can tell main-screen windows from virtual-display windows.
-                    "displayId" to w.displayId,
-                ))
+                )
+                // P0 virtual display: expose which display a window belongs to so
+                // the CLI can tell main-screen windows from virtual-display windows.
+                // AccessibilityWindowInfo.getDisplayId() is API 30+; on older
+                // systems the key is omitted rather than throwing.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) m["displayId"] = w.displayId
+                out.add(m)
             }
         } catch (_: Throwable) {}
         return out

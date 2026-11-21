@@ -46,9 +46,9 @@ import com.openminis.app.sandbox.offload.DeviceOffloadHandler
 import com.openminis.app.sandbox.offload.LocationOffloadHandler
 import com.openminis.app.sandbox.offload.ModelUseOffloadHandler
 import com.openminis.app.sandbox.offload.SessionsOffloadHandler
+import com.openminis.app.sandbox.offload.NotificationOffloadHandler
 import com.openminis.app.sandbox.offload.ShizukuOffloadHandler
 import com.openminis.app.sandbox.offload.VdOffloadHandler
-import com.openminis.app.sandbox.offload.NotificationOffloadHandler
 import com.openminis.app.sandbox.offload.OpenOffloadHandler
 import com.openminis.app.sandbox.offload.PhotosOffloadHandler
 import com.openminis.app.sandbox.offload.PlayerOffloadHandler

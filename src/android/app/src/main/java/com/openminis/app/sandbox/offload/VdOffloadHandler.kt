@@ -310,6 +310,13 @@ Common flags: --compact / -q / --quiet.
         val y = args.positional.getOrNull(2)?.toIntOrNull()
             ?: return errEnvelope("INVALID_ARGS", "usage: $TOOL tap <displayId> <x> <y>", args)
 
+        // Only our managed virtual displays: a wrong id (e.g. 0) must not route
+        // input to the user's main screen.
+        MinisAgentDisplayManager.get(id)
+            ?: return errEnvelope("VD_NOT_FOUND",
+                "no in-process virtual display $id; `create` it first " +
+                    "(main-screen input is `android-shizuku-cli input tap`, not this tool)", args)
+
         val r = shizukuRun(listOf("input", "-d", id.toString(), "tap", x.toString(), y.toString()))
         if (r == null) {
             return errEnvelope("SHIZUKU_NOT_READY",

@@ -1235,7 +1235,7 @@ Usage:
   android-shizuku-cli input text <text> [--display N]
 
   -d/--display N targets that display id (P0 virtual display from
-  `android-vd-cli create`), e.g. `input -d 7 tap 540 1200`.
+  `android-vd-cli create`), e.g. `input tap 540 1200 -d 7`.
   `input text` only accepts the long `--display` form: its text is the
   joined positional args, and a short `-d N` would leak N into the text.
 """
@@ -1260,6 +1260,15 @@ Usage:
 """
 
         private const val DEVICE_HELP = """device — device state.
+
+Usage:
+  android-shizuku-cli device info
+  android-shizuku-cli device battery
+  android-shizuku-cli device usage [--package pkg] [--top N]
+"""
+    }
+}
+e — device state.
 
 Usage:
   android-shizuku-cli device info

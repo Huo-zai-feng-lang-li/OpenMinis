@@ -347,7 +347,7 @@ object MinisAgentDisplayManager {
             flags = VdFlags.displayFlags(Build.VERSION.SDK_INT, trusted)
             try {
                 dm.createVirtualDisplay(name, w, h, d, reader.surface, flags)
-            } catch (e: SecurityException) {
+            } catch (e: Throwable) {
                 reader.close()
                 return VdCreateResult.Failed("CREATION_FAILED",
                     "createVirtualDisplay(${w}x$h dpi=$d, flags=0x${flags.toString(16)}) was refused " +
@@ -504,7 +504,7 @@ private class VdAwake(private val poke: (Int) -> Boolean) {
 
     fun start(displayId: Int) {
         if (unavailable) return
-        val cancel = timer.scheduleAtFixedDelay({
+        val cancel = timer.scheduleWithFixedDelay({
             if (!poke(displayId)) giveUp()
         }, 0, PERIOD_MS, TimeUnit.MILLISECONDS)
         synchronized(running) {
