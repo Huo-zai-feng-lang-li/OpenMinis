@@ -87,19 +87,19 @@ jobs:
           ls -la dist/
 
 
-      - name: Publish release (in-app update protocol, tag 1.26)
+      - name: Publish release (in-app update protocol, tag 1.27)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           apk=$(find dist -name '*.apk' | head -1)
-          out="MinisApp-1.26-build57-arm64-v8a.apk"
+          out="MinisApp-1.27-build58-arm64-v8a.apk"
           cp "$apk" "$out"
-          if gh release view 1.26 >/dev/null 2>&1; then
-            gh release upload 1.26 "$out" --clobber
+          if gh release view 1.27 >/dev/null 2>&1; then
+            gh release upload 1.27 "$out" --clobber
           else
-            gh release create 1.26 \
-              --title "Minis 1.26 (build 57, vd repair-spec closeout)" \
-              --notes "Virtual display repair-spec closeout: (1) task repin via IActivityTaskManager moveRootTaskToDisplay — launch/run/tap re-pin the app's task onto the virtual display; refuses to steal a task the user has visible on the main screen (APP_VISIBLE_ON_MAIN); run reports APP_ESCAPED when the app resists the virtual display; (2) run nudge cascade for stalled splash (tap center -> keyevent BACK -> cold restart; nudgeUsed in the envelope; SPLASH_STALLED when all fail); (3) new text subcommand (KeyCharacterMap, CJK/Unicode) and find subcommand (a11y tree on the display, top-5 matches with click centers, honest A11Y_DISPLAY_NOT_VISIBLE when the screen is a11y-invisible); (4) latestFramePng fresh-frame-first (an emptied display shows black, not a replayed stale splash); (5) Dynamic Island resident while a virtual display is live (agent_status FGS survives agent-idle self-stop; subtitle = running package; legacy 9001/9002 cancelled on upgrade); (6) capsule drag follows the finger 1:1 with 60Hz throttling; (7) system-rules default template gains the virtual-display workflow (migrated in place when unmodified). Perf (AOT, non-debuggable) build; in-place update over 1.25 (same CI test key)." "$out"
+            gh release create 1.27 \
+              --title "Minis 1.27 (build 58, SubAgentPill + session-bound capsule + repin fix)" \
+              --notes "New: SubAgentPill pinned at chat top (model info + timer + pause), virtual display capsule session-bound, moveTask am fallback (repin works in shell mode), visibleOnMainScreen fixed, 8 reflection type fixes, P2 batch (text errEnvelope, a11y recycle, cold-restart guard, taskId refresh). Perf build; in-place update over 1.26." "$out"
           fi
 
       - uses: actions/upload-artifact@v4
