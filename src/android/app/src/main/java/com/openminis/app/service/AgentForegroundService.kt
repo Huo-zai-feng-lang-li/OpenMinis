@@ -1595,7 +1595,7 @@ class AgentForegroundService : Service() {
             .setOnlyAlertOnce(true)
             .setContentIntent(contentIntent)
             .setColorized(false)
-            .setCategory(Notification.CATEGORY_MEDIA)
+            .setCategory(NotificationCompat.CATEGORY_MEDIA)
             .setStyle(
                 Notification.MediaStyle()
                     .setMediaSession(islandMediaSession(stopIntent).sessionToken)
@@ -1715,7 +1715,7 @@ class AgentForegroundService : Service() {
     private fun islandLargeIcon(): android.graphics.Bitmap? {
         islandLargeIconCache?.let { return it }
         val bmp = runCatching {
-            val iconRes = packageManager.getApplicationInfo(applicationContext.packageName, 0).iconRes
+            val iconRes = packageManager.getApplicationInfo(applicationContext.packageName, 0).icon
             if (iconRes == 0) return@runCatching null
             val decoded = android.graphics.BitmapFactory.decodeResource(applicationContext.resources, iconRes)
                 ?: return@runCatching null
