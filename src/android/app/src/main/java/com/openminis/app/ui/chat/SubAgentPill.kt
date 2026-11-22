@@ -85,7 +85,8 @@ private const val FINISHED_VISIBLE_MS = 3_000L
 internal fun SubAgentPill(currentSessionId: () -> String) {
     val context = LocalContext.current
     val jobs by AgentJobRegistry.jobs.collectAsState(initial = AgentJobRegistry.jobs.value)
-    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    val nowState = remember { mutableStateOf(System.currentTimeMillis()) }
+    val now = nowState.value
     // [T-subagent-pill] Read on every composition, like the scheduled pill:
     // a draft chat gets its real id on the first message.
     val sessionId = currentSessionId()
@@ -109,7 +110,7 @@ internal fun SubAgentPill(currentSessionId: () -> String) {
         if (!shown) return@LaunchedEffect
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             while (true) {
-                now = System.currentTimeMillis()
+                nowState.value = System.currentTimeMillis()
                 delay(1_000L - now % 1_000L)
             }
         }
