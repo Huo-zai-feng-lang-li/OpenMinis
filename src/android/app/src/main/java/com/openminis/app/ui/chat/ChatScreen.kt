@@ -3789,13 +3789,23 @@ fun ChatScreen(
             // pill composes. A new chat opens as a "__new__…" draft and gets
             // its id on the first message, while `sessionId` here stays the
             // draft id - so the pill matched no task in a chat started fresh.
-            ScheduledTaskPill(currentSessionId = { viewModel.currentSessionId })
-            // [T-subagent-pill] Sub agent work of THIS chat, pinned the same
-            // place and by the same real-id rule as the scheduled pill,
-            // stacked under it (the 1.26 build's original mount - 1.30's
-            // mount restore dropped this ScheduledTaskPill line by
-            // accident, which is why scheduled tasks stopped pinning).
-            SubAgentPill(currentSessionId = { viewModel.currentSessionId })
+            // [T-subagent-pill-ui] The two status slots sit side by side (the
+            // 1.29 build's layout the user pointed at as the reference): the
+            // scheduled countdown in the left lane, this chat's live sub
+            // agents in the right lane. Each keeps its own 50 % lane and
+            // centers in it, so a lone pill never jumps when its twin
+            // appears/disappears.
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+            ) {
+                Box(modifier = Modifier.weight(1f)) {
+                    ScheduledTaskPill(currentSessionId = { viewModel.currentSessionId })
+                }
+                Box(modifier = Modifier.weight(1f)) {
+                    SubAgentPill(currentSessionId = { viewModel.currentSessionId })
+                }
+            }
         } },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
