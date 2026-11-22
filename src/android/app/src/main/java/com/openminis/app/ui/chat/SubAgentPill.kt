@@ -24,7 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -85,7 +85,7 @@ private const val FINISHED_VISIBLE_MS = 3_000L
 internal fun SubAgentPill(currentSessionId: () -> String) {
     val context = LocalContext.current
     val jobs by AgentJobRegistry.jobs.collectAsState(initial = AgentJobRegistry.jobs.value)
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
     // [T-subagent-pill] Read on every composition, like the scheduled pill:
     // a draft chat gets its real id on the first message.
     val sessionId = currentSessionId()
@@ -227,7 +227,6 @@ private fun SubAgentPillCard(
                         onTogglePause()
                     },
                     modifier = Modifier.size(28.dp),
-                    contentDescription = if (paused) "恢复子代理" else "暂停子代理",
                 ) {
                     Icon(
                         if (paused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
