@@ -2750,6 +2750,7 @@
     <string name="capsule_vd_btn_back">Back (placeholder)</string>
     <string name="capsule_vd_btn_mute">Mute (placeholder)</string>
     <string name="capsule_vd_btn_pause">Pause the screen stream</string>
+    <string name="capsule_vd_btn_minimize">Minimize the capsule</string>
     <string name="capsule_vd_btn_close">Hide the capsule</string>
     <string name="vd_settings_title">Virtual display</string>
     <string name="vd_settings_desc">Create an invisible virtual display and follow it live in a floating capsule window</string>

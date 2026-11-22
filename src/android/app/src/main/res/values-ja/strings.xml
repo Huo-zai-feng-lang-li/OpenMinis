@@ -2038,6 +2038,7 @@
     <string name="capsule_vd_btn_back">戻る（プレースホルダー）</string>
     <string name="capsule_vd_btn_mute">ミュート（プレースホルダー）</string>
     <string name="capsule_vd_btn_pause">画面ストリームを停止</string>
+    <string name="capsule_vd_btn_minimize">キャプセルを最小化</string>
     <string name="capsule_vd_btn_close">小窓を閉じる</string>
     <string name="vd_settings_title">仮想ディスプレイ</string>
     <string name="vd_settings_desc">見えない仮想ディスプレイを作成し、フローティングのキャプセルウィンドウで生配信を追える</string>

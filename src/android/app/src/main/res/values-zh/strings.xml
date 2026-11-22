@@ -2548,6 +2548,7 @@
     <string name="capsule_vd_btn_back">返回（占位）</string>
     <string name="capsule_vd_btn_mute">静音（占位）</string>
     <string name="capsule_vd_btn_pause">暂停画面</string>
+    <string name="capsule_vd_btn_minimize">最小化胶囊</string>
     <string name="capsule_vd_btn_close">收起小窗</string>
     <string name="vd_settings_title">虚拟显示</string>
     <string name="vd_settings_desc">创建不可见的虚拟屏，悬浮小窗实时跟看画面</string>

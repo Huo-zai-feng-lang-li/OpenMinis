@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Minimize
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material3.Icon
@@ -312,6 +313,11 @@ fun CapsuleContent(displayId: Int) {
     // Tapping the frame toggles the expanded (bigger, moved up) state; the
     // window is BOTTOM|END-anchored so it grows up + to the left.
     var expanded by remember { mutableStateOf(false) }
+    // Minimized: the card collapses to a 36dp rounded square (screen glyph +
+    // number only); because the window is BOTTOM|END-anchored the square
+    // sits tucked in the bottom-right corner. Tapping it restores the full
+    // card (in whatever expanded/collapsed state it had before).
+    val minimized by remember { mutableStateOf(false) }
 
     // Stream: the display's preview frames (≤10 fps upstream, short side
     // ≤360px) throttled to ≤PREVIEW_FPS and deduped; cancel when paused.
@@ -351,6 +357,31 @@ fun CapsuleContent(displayId: Int) {
     val cardW = ((area?.width ?: 1080) * (if (expanded) 0.8f else 0.75f)) / pxPerDp
     val cardH = ((area?.height ?: 2520) * (if (expanded) 0.6f else 0.4f)) / pxPerDp
 
+    if (minimized) {
+        // Collapsed state: a 36dp rounded square showing only the screen
+        // glyph + number, pinned in the bottom-right corner. Tap to restore
+        // the full card (the overlay window resizes with the content).
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color(0xE61B1B1B))
+                .clickable { minimized = false },
+            contentAlignment = Alignment.Center,
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(text = "🖥", fontSize = 11.sp, color = Color(0xEEEEEEEE))
+                Text(
+                    text = displayId.toString(),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xEEEEEEEE),
+                )
+            }
+        }
+        return
+    }
+
     Column(
         modifier = Modifier
             .size(cardW.dp, cardH.dp)
@@ -374,6 +405,10 @@ fun CapsuleContent(displayId: Int) {
                 if (paused) Icons.Filled.PlayCircle else Icons.Filled.Pause,
                 stringResource(R.string.capsule_vd_btn_pause)
             ) { paused = !paused }
+            CapsuleButton(
+                Icons.Filled.Minimize,
+                stringResource(R.string.capsule_vd_btn_minimize),
+            ) { minimized = true }
             CapsuleButton(Icons.Filled.Close,
                 stringResource(R.string.capsule_vd_btn_close)) {
                 MinisCapsule.hide()
@@ -439,4 +474,4 @@ private fun CapsuleButton(
     }
 }
 
-private const val STALE_AFTER_NANOS = 3_000_000_000L // 3s
+private const val STALE_AFTER_NANOS = 15_000_000_000L // 15s: calculator/settings-class apps often don't render new frames; 3-5s flagged healthy-but-quiet screens as stuck. 15s still catches a real freeze/crash.
