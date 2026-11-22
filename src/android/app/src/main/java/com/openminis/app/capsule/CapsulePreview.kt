@@ -317,7 +317,8 @@ fun CapsuleContent(displayId: Int) {
     // number only); because the window is BOTTOM|END-anchored the square
     // sits tucked in the bottom-right corner. Tapping it restores the full
     // card (in whatever expanded/collapsed state it had before).
-    val minimized by remember { mutableStateOf(false) }
+    val minimizedState = remember { mutableStateOf(false) }
+    val minimized = minimizedState.value
 
     // Stream: the display's preview frames (≤10 fps upstream, short side
     // ≤360px) throttled to ≤PREVIEW_FPS and deduped; cancel when paused.
@@ -366,7 +367,7 @@ fun CapsuleContent(displayId: Int) {
                 .size(36.dp)
                 .clip(RoundedCornerShape(10.dp))
                 .background(Color(0xE61B1B1B))
-                .clickable { minimized = false },
+                .clickable { minimizedState.value = false },
             contentAlignment = Alignment.Center,
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -408,7 +409,7 @@ fun CapsuleContent(displayId: Int) {
             CapsuleButton(
                 Icons.Filled.Minimize,
                 stringResource(R.string.capsule_vd_btn_minimize),
-            ) { minimized = true }
+            ) { minimizedState.value = true }
             CapsuleButton(Icons.Filled.Close,
                 stringResource(R.string.capsule_vd_btn_close)) {
                 MinisCapsule.hide()
