@@ -137,6 +137,9 @@
     <string name="bg_service_notification_title_completed">任务已完成</string>
     <string name="bg_service_notification_text_completed">%1$s | 用时 %2$s</string>
     <string name="bg_service_stop_action">停止</string>
+    <!-- [T-vd-island-resident] 虚拟屏活动、无 agent 任务时的常驻岛副标题 -->
+    <string name="vd_island_running">虚拟屏运行中</string>
+    <string name="vd_island_running_with_pkg">虚拟屏运行中 · %1$s</string>
     <plurals name="bg_service_sessions">
         <item quantity="one">%d 个会话</item>
         <item quantity="other">%d 个会话</item>

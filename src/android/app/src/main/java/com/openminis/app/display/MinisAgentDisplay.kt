@@ -85,6 +85,12 @@ interface AgentDisplayApi : AutoCloseable {
     val hasFrameNow: Boolean
     /** Live preview frames (short side ≤ 360px, black frames published as null). */
     val frames: StateFlow<Bitmap?>
+    /**
+     * Full-frame PNG of the FRESHEST frame. [vd-png-freshness] fresh-first
+     * contract: a frame is acquired on the spot when the reader's queue
+     * has one, so a screen the app has left reports BLACK immediately —
+     * only an empty queue falls back to the retained last frame.
+     */
     fun latestFramePng(): ByteArray?
     fun latestFrameBitmap(): Bitmap?
     fun lastFrameAt(): Long?
@@ -227,9 +233,72 @@ class MinisAgentDisplay internal constructor(
         }
     }
 
-    /** Full-frame PNG of the latest frame, or null while no frame has been produced yet. */
+    /**
+     * Full-frame PNG of the FRESHEST frame. [vd-png-freshness]
+     * Fresh-frame-first contract: `acquireLatestImage()` is called ON THE
+     * SPOT under [frameLock] — when the producer (SurfaceFlinger) has a
+     * frame in the reader's queue, THAT frame is encoded, not the retained
+     * copy. This is what makes an off-screen app show as BLACK immediately:
+     * while the screen is empty the compositor keeps producing fresh black
+     * frames, so the PNG reflects the current (black) screen instead of
+     * replaying the last non-black frame forever — the stale-splash
+     * symptom (the frame pipeline was fine, the screen just went black).
+     * Only when acquire returns null (queue empty — nothing has been
+     * produced yet, or the reader is shutting down) do we fall back to
+     * the retained last frame.
+     *
+     * The acquire lives inside the lock (the frame thread's
+     * [processLatest] copies under [frameLock] too) and the image is
+     * closed right here — the reader hands out distinct Image objects per
+     * acquirer, so there is no double-close with [processLatest]'s own
+     * acquire. The preview stream ([frames]) is left to the frame
+     * thread's ≤10fps cadence; this path updates the retained full-frame
+     * state only.
+     */
     override fun latestFramePng(): ByteArray? {
-        val crop = latestFrameBitmap() ?: return null
+        // Read the geometry OUTSIDE the lock, exactly like processLatest:
+        // the getter is a DisplayManager binder call, not worth holding
+        // [frameLock] across.
+        val capturedGeometry = geometry
+        val crop = synchronized(frameLock) {
+            val fresh = try {
+                reader.acquireLatestImage()
+            } catch (t: Throwable) {
+                // Closed reader (release in flight) or a flaky acquire:
+                // fall through to the retained frame below.
+                AppLogger.warning(TAG, "latestFramePng: acquireLatestImage failed: ${t.javaClass.simpleName}")
+                null
+            }
+            if (fresh != null) {
+                try {
+                    // Same buffer setup as processLatest: stride-padded
+                    // full frame (width = rowStride / pixelStride), then
+                    // the shared crop/upright logic.
+                    val plane = fresh.planes[0]
+                    val strideWidth = plane.rowStride / plane.pixelStride
+                    var bmp = fullFrame
+                    if (bmp == null || bmp.width != strideWidth) {
+                        bmp?.recycle()
+                        bmp = Bitmap.createBitmap(strideWidth, bufferHeight, Bitmap.Config.ARGB_8888)
+                        fullFrame = bmp
+                    }
+                    bmp!!.copyPixelsFromBuffer(plane.buffer.rewind())
+                    hasFrame = true
+                    // The frame's moment is the producer's timestamp, and
+                    // lastFrameAt()/the idle sweep see a genuinely fresh
+                    // frame — this display's pipeline is alive.
+                    frameTimestampNanos = fresh.timestamp
+                    frameGeometry = capturedGeometry
+                    vdUprightFrame(bmp, capturedGeometry, paint = paint)
+                } finally {
+                    fresh.close()
+                }
+            } else {
+                // Queue empty: fall back to the retained last frame.
+                val bmp = fullFrame
+                if (!hasFrame || bmp == null) null else vdUprightFrame(bmp, frameGeometry, paint = paint)
+            }
+        } ?: return null
         return try {
             ByteArrayOutputStream().also { crop.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
         } finally {
@@ -447,8 +516,51 @@ class MinisShellAgentDisplay internal constructor(
         }
     }
 
+    /**
+     * Full-frame PNG of the FRESHEST frame. [vd-png-freshness]
+     * Fresh-frame-first contract (M1 twin of [MinisAgentDisplay]):
+     * `acquireLatestImage()` ON THE SPOT under [frameLock] — when the
+     * producer has a frame queued, THAT frame is encoded, not the
+     * retained copy, so an off-screen app shows as BLACK immediately
+     * instead of the stale-splash replay. acquire null → fall back to
+     * the retained last frame. The acquire + close happen inside the
+     * lock and close the image we acquired (no double-close with
+     * [processLatest], the reader hands out distinct Images per
+     * acquirer).
+     */
     override fun latestFramePng(): ByteArray? {
-        val crop = latestFrameBitmap() ?: return null
+        val capturedGeometry = geometry // outside the lock, like processLatest
+        val crop = synchronized(frameLock) {
+            val fresh = try {
+                reader.acquireLatestImage()
+            } catch (t: Throwable) {
+                AppLogger.warning(SHELL_TAG, "latestFramePng: acquireLatestImage failed: ${t.javaClass.simpleName}")
+                null
+            }
+            if (fresh != null) {
+                try {
+                    val plane = fresh.planes[0]
+                    val strideWidth = plane.rowStride / plane.pixelStride
+                    var bmp = fullFrame
+                    if (bmp == null || bmp.width != strideWidth) {
+                        bmp?.recycle()
+                        bmp = Bitmap.createBitmap(strideWidth, bufferHeight, Bitmap.Config.ARGB_8888)
+                        fullFrame = bmp
+                    }
+                    bmp!!.copyPixelsFromBuffer(plane.buffer.rewind())
+                    hasFrame = true
+                    frameTimestampNanos = fresh.timestamp
+                    frameGeometry = capturedGeometry
+                    vdUprightFrame(bmp, capturedGeometry, paint = paint)
+                } finally {
+                    fresh.close()
+                }
+            } else {
+                // Queue empty: fall back to the retained last frame.
+                val bmp = fullFrame
+                if (!hasFrame || bmp == null) null else vdUprightFrame(bmp, frameGeometry, paint = paint)
+            }
+        } ?: return null
         return try {
             ByteArrayOutputStream().also { crop.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
         } finally {
@@ -755,6 +867,10 @@ object MinisAgentDisplayManager {
         }
         if (removed.isEmpty()) return
         removed.forEach { awake.stop(it.displayId); it.release() }
+        // [vd-task-pinner] the pinner's loops are keyed on these displays;
+        // the process dies with them anyway, but stop them deliberately so
+        // no dumpsys flap races the teardown.
+        VdTaskPinner.unpinAll()
         notifyChanged()
     }
 

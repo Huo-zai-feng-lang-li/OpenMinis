@@ -1173,6 +1173,16 @@ object SessionActivityTracker {
         }
         synchronized(serviceLock) {
             serviceWanted = false
+            // [T-vd-island-resident] The agent-side idle self-stop must not
+            // drag the island down: while a virtual display is still live the
+            // service stays resident ("all sessions complete" is NOT the end
+            // of the story). The service's own display-change listener
+            // performs this exact stop when the last display is released,
+            // and any task-driven dispatch in between re-updates it.
+            if (AgentForegroundService.vdDisplayResident()) {
+                Log.d(TAG, "virtual display resident — keeping the foreground service alive")
+                return
+            }
             AgentForegroundService.stopService(context)
             Log.d(TAG, "All sessions complete, service stopped")
         }

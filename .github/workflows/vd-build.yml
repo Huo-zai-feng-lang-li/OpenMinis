@@ -87,19 +87,19 @@ jobs:
           ls -la dist/
 
 
-      - name: Publish release (in-app update protocol, tag 1.24)
+      - name: Publish release (in-app update protocol, tag 1.25)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           apk=$(find dist -name '*.apk' | head -1)
-          out="MinisApp-1.24-build55-arm64-v8a.apk"
+          out="MinisApp-1.25-build56-arm64-v8a.apk"
           cp "$apk" "$out"
-          if gh release view 1.24 >/dev/null 2>&1; then
-            gh release upload 1.24 "$out" --clobber
+          if gh release view 1.25 >/dev/null 2>&1; then
+            gh release upload 1.25 "$out" --clobber
           else
-            gh release create 1.24 \
-              --title "Minis 1.24 (build 55, one-shot run + session-bound virtual display)" \
-              --notes "Virtual display, fast + accurate + session-bound: (1) new one-shot `run <component> [--user u]` = create + move app onto the display + wait for first real frame + screenshot in a single call (returns framed/shotPath/waitedMs; waits end at the first frame, not the full timeout); (2) session binding: each display is tagged with its creating chat session, only ONE display is live globally — switching to another session auto-releases the previous one and its capsule, so opening a display in a new session never spawns a second one; (3) capsule drag now follows the finger 1:1 (fixed cumulative-delta drift) with 60Hz update throttling so dragging itself stays smooth; (4) launch keeps the 1.23 force-stop-move. Perf (AOT, non-debuggable) build. In-place update over 1.23." "$out"
+            gh release create 1.25 \
+              --title "Minis 1.25 (build 56, virtual display: task pinner + island resident + text/find)" \
+              --notes "Virtual display, fast + accurate + honest: (1) task pinner — after launch/run the target task is pinned onto the virtual display (2s dumpsys probes; off-display task is pulled back via `am display move-stack`, a killed app is re-landed; 3 consecutive escape wins => APP_MOVES_TASK is reported, no flapping); (2) `run` envelope gains pinned/taskId, and a frame-wait timeout that is actually an app escape now says APP_ESCAPED_DISPLAY instead of a misleading no-frame message; latestFramePng goes fresh-frame-first so a display left empty shows black instead of replaying a stale splash frame; (3) new `text <displayId> <text>` (KeyCharacterMap path, CJK included) and `find <displayId> <text> [--type node|image]` (a11y tree of the virtual display, top-5 matches with click centers; honest A11Y_DISPLAY_NOT_VISIBLE when the screen is a11y-invisible); (4) Dynamic Island stays resident while a virtual display is live (agent_status FGS survives the agent-idle self-stop; subtitle shows the running package; legacy 9001/9002 cancelled on upgrade); (5) system rules default template gains the virtual-display workflow (migrated in place when unmodified). Perf (AOT, non-debuggable) build. In-place update over 1.24." "$out"
           fi
 
       - uses: actions/upload-artifact@v4

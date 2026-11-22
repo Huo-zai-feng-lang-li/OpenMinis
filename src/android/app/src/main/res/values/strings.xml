@@ -166,6 +166,10 @@
     <string name="bg_service_notification_title_completed">Task completed</string>
     <string name="bg_service_notification_text_completed">%1$s | Completed in %2$s</string>
     <string name="bg_service_stop_action">Stop</string>
+    <!-- [T-vd-island-resident] Resident island row shown while an agent
+         virtual display is live and no agent task is running. -->
+    <string name="vd_island_running">Virtual display running</string>
+    <string name="vd_island_running_with_pkg">Virtual display running · %1$s</string>
     <plurals name="bg_service_sessions">
         <item quantity="one">%d session</item>
         <item quantity="other">%d sessions</item>

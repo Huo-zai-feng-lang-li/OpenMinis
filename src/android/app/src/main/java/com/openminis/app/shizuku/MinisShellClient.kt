@@ -216,6 +216,20 @@ object MinisShellClient {
             .getOrNull()
     }
 
+    /**
+     * [T-vd-island-resident] The package most recently launched on
+     * [displayId] (the resident island's subtitle), or null when the
+     * display is unknown, no app was started on it, the host is not
+     * bound, or the running helper predates the method. Deliberately
+     * does NOT [ensureShell] a fresh 10 s bind just to read a label.
+     */
+    fun launchedApp(displayId: Int): String? {
+        val s = shell ?: return null
+        return runCatching { s.launchedApp(displayId) }
+            .onFailure { AppLogger.warning(TAG, "launchedApp($displayId) binder call failed: ${it.message}") }
+            .getOrNull()
+    }
+
     /** Release every shell-host display (call on app teardown). */
     fun releaseAllDisplays() {
         val s = shell ?: return

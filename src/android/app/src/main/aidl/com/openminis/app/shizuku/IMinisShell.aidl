@@ -93,4 +93,16 @@ interface IMinisShell {
 
     /** Release every display and stop all keep-awake loops. */
     void releaseAll() = 9;
+
+    /**
+     * The package name of the app most recently started on [displayId]
+     * (via {@link #startAppInUser}), or null when nothing was launched
+     * there yet.
+     *
+     * <p>Added after the M1 interface shipped: an older helper process
+     * has no implementation for this transaction code; its Stub falls
+     * through to the default unknown-transaction path and unparcels null, so callers treat null as "unknown" and
+     * fall back to a package-less label.
+     */
+    String launchedApp(int displayId);
 }

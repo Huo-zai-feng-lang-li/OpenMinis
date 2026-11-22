@@ -6,6 +6,7 @@ import com.openminis.app.accessibility.MinisAccessibilityService
 import com.openminis.app.display.AgentDisplayApi
 import com.openminis.app.display.MinisAgentDisplayManager
 import com.openminis.app.display.VdCreateResult
+import com.openminis.app.display.VdTaskPinner
 import com.openminis.app.logging.AppLogger
 import com.openminis.app.offload.ShizukuManager
 import com.openminis.app.sandbox.ExecutionCoordinator
@@ -13,11 +14,13 @@ import com.openminis.app.sandbox.NativeOffloadHandler
 import com.openminis.app.sandbox.NativeOffloadRequest
 import com.openminis.app.sandbox.NativeOffloadResult
 import com.openminis.app.sandbox.PRootKernel
+import com.openminis.app.shizuku.MinisShellClient
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.ArrayDeque
 
 /**
  * T-android-virtual-display-p0: `android-vd-cli` — the P0 in-process virtual
@@ -111,6 +114,7 @@ Subcommands:
                    fails outright — killing the target's own instance is
                    how it actually lands on the virtual display. Needs
                    Shizuku READY (`android-shizuku-cli service status`).
+                   app 被钉在屏上（自动 move-stack 拉回，3 次失败报 APP_MOVES_TASK）
   run <component> [--user <u>] [--w N --h N --dpi N] [--wait <ms>]
                    One-shot: create the display (leak-sweep included),
                    move <component> onto it, wait for its first
@@ -118,6 +122,7 @@ Subcommands:
                    `framed=false` on --wait timeout / all-black frames
                    (the created display stays up — `release` it after);
                    any earlier failure releases it again.
+                   app 被钉在屏上（自动 move-stack 拉回，3 次失败报 APP_MOVES_TASK）
   tap <displayId> <x> <y>
                    Tap on the display via Shizuku: `input -d <displayId>
                    tap <x> <y>`.
@@ -138,6 +143,26 @@ P0 verification checklist (details: docs/virtual-display-P0.md):
                virtual display (Mika issue #622) — node actions replace it;
   6. longrun — the display stays awake for 30+ minutes and the main
                display's focus is never stolen.
+
+Text & UI:
+  text <displayId> <text>
+                   Type [text] on the display via the Shizuku shell host:
+                   first tries KeyCharacterMap (virtual keyboard, supports
+                   CJK/Unicode) and falls back to `input -d <displayId>
+                   text` (ASCII only). Reports `method` ("keycharmap",
+                   "input_text" or "unknown") and `ok`.
+  find <displayId> <text> [--type node|image]
+                   Search the display's a11y tree for [text]. node: matches
+                   text/contentDescription containing [text]; image:
+                   matches className containing "Image" or
+                   contentDescription containing [text]. Up to 5 matches per
+                   type; each returns {text, className, bounds{x,y,w,h},
+                   clickX, clickY}. No matches → hint to fall back to shot
+                   + visual. Requires the a11y service to be running and the
+                   display to be visible to it; if the display's windows are
+                   not in a11y getWindows() (untrusted displays may not be
+                   visible), returns A11Y_DISPLAY_NOT_VISIBLE — do NOT
+                   fabricate results, fall back to shot + visual.
 
 Common flags: --compact / -q / --quiet.
 """
@@ -169,6 +194,8 @@ Common flags: --compact / -q / --quiet.
                 "launch"  -> launch(args)
                 "run"     -> run(args, request.sessionId)
                 "tap"     -> tap(args)
+                "text"    -> text(args)
+                "find"    -> find(args)
                 "release" -> release(args)
                 else      -> NativeOffloadResult(2, "$TOOL: unknown subcommand '$sub'\n$HELP")
             }
@@ -278,6 +305,12 @@ Common flags: --compact / -q / --quiet.
     private fun release(args: OffloadArgs): NativeOffloadResult {
         val id = args.positional.getOrNull(0)?.toIntOrNull()
             ?: return errEnvelope("INVALID_ARGS", "usage: $TOOL release <displayId>", args)
+        // [vd-task-pinner] stop the pinner BEFORE the display goes away:
+        // its restart path would otherwise `am start` the app back onto a
+        // dead display id (the framework rejects it, but the strikes flap
+        // for a while). Unpinning a display that was never pinned is a
+        // no-op.
+        VdTaskPinner.unpin(id)
         if (!MinisAgentDisplayManager.release(id)) {
             return errEnvelope("VD_NOT_FOUND", "no in-process virtual display $id; `list` shows the active ones", args)
         }
@@ -440,6 +473,13 @@ Common flags: --compact / -q / --quiet.
             )
         }
         return if (r.exitCode == 0) {
+            // [vd-task-pinner] The app may pull its Task back to display 0
+            // after the splash (PDD does) and nothing else watches for it:
+            // start the 2s probe loop that moves it back (move-stack /
+            // am start) and gives up with APP_MOVES_TASK after 3 straight
+            // failed corrections. Idempotent — a re-launch on the same
+            // display just restarts the watch.
+            user.toIntOrNull()?.let { uid -> VdTaskPinner.pin(id, pkg, uid, component) }
             LaunchResult.Ok(pkg, r.stdout.trim().take(400))
         } else LaunchResult.Err("OPERATION_FAILED", "am start failed: ${r.combined.take(500)}")
     }
@@ -510,9 +550,21 @@ Common flags: --compact / -q / --quiet.
         }
         val pkg = component.substringBefore('/')
 
+        // 2b. [vd-task-pinner] start the pin BEFORE the frame wait: an app
+        //     that escapes after its splash (PDD) gets pulled back by the
+        //     pinner's move-stack WITHIN the wait window, so the wait
+        //     yields a live frame instead of timing out on black. This
+        //     re-calls pin on purpose — launchComponent's own pin may have
+        //     started up to 2s earlier; re-pinning resets the watch so
+        //     round 1 lines up with the wait window (idempotent per display).
+        val uid = user.toInt()
+        VdTaskPinner.pin(d.displayId, pkg, uid, component)
+        val taskIdNow = VdTaskPinner.peekTask(pkg)
+            .tasks.firstOrNull { it.display == d.displayId }?.taskId
+
         // 3. wait for the first real frame: skip null and black, keep
         //    waiting otherwise.
-        val waited = waitForFirstFrame(d, waitMs)
+        val waited = waitForFirstFrame(d, waitMs, pkg)
         val framed = waited.framed
         val waitedMs = SystemClock.elapsedRealtime() - t0
         AppLogger.info(TAG, "run: display ${d.displayId} $component framed=$framed waitedMs=$waitedMs")
@@ -529,6 +581,15 @@ Common flags: --compact / -q / --quiet.
             .put("framed", framed)
             .put("framedReason", waited.reason)
             .put("waitedMs", waitedMs)
+            // [vd-task-pinner] the pin state as of the frame-wait start:
+            // `pinned` says the watch is running (it dies with the display
+            // release or the APP_MOVES_TASK / 15-min idle stop), `taskId`
+            // is the task id that `am display move-stack` takes (JSON null
+            // when the probe found no task yet — the app is still starting
+            // up; JSONObject.NULL so it serializes as a real null, not an
+            // NPE from put(String, null)).
+            .put("pinned", true)
+            .put("taskId", taskIdNow ?: JSONObject.NULL)
         val png = d.latestFramePng()
         if (png != null) {
             when (val w = writePng(d, png, sessionId)) {
@@ -555,6 +616,25 @@ Common flags: --compact / -q / --quiet.
     private data class FrameWaitResult(val framed: Boolean, val reason: String)
 
     /**
+     * Frame-wait timed out with no frame: before blaming the pipeline,
+     * check where the app's task actually is — reusing the pinner's
+     * dumpsys parse ([VdTaskPinner.peekTask]). The task on another
+     * display (or gone) means a black screen is EXPECTED and the
+     * `framedReason` should name it (APP_ESCAPED_DISPLAY + the pinner's
+     * strike count, so the agent knows the pinner already fought it).
+     * The task on the display means the black screen is a real
+     * frame-pipeline symptom — keep the generic reason.
+     */
+    private fun escapeReason(d: AgentDisplayApi, pkg: String): String? {
+        val peek = VdTaskPinner.peekTask(pkg)
+        if (!peek.probed) return null // dumpsys/Shizuku unavailable — don't guess
+        val onDisplay = peek.tasks.any { it.display == d.displayId }
+        if (onDisplay) return null
+        return "APP_ESCAPED_DISPLAY: $pkg task not on display ${d.displayId} " +
+            "(pinner strikes=${VdTaskPinner.strikes(d.displayId)})"
+    }
+
+    /**
      * Subscribe to [d]'s [AgentDisplayApi.frames] until a usable frame
      * arrives. `frames` publishes BLACK frames as null and drops
      * near-black variants, so the only acceptance test that adds
@@ -566,6 +646,7 @@ Common flags: --compact / -q / --quiet.
     private fun waitForFirstFrame(
         d: AgentDisplayApi,
         timeoutMs: Long,
+        pkg: String,
     ): FrameWaitResult {
         val initial = d.frames.value
         if (initial != null && d.isLastFrameBlack() != true) {
@@ -600,7 +681,11 @@ Common flags: --compact / -q / --quiet.
             // downgraded it); count it as framed, the PNG tells the truth.
             FrameWaitResult(true, "full-res frame present although preview stream is null/black")
         } else {
-            FrameWaitResult(false, "no non-black frame within ${timeoutMs}ms")
+            // [vd-task-pinner] a black screen is expected when the app's
+            // task escaped the display — name it (with the pinner's strike
+            // count) instead of the generic timeout; when the task IS on
+            // the display keep the generic reason (real pipeline symptom).
+            FrameWaitResult(false, escapeReason(d, pkg) ?: "no non-black frame within ${timeoutMs}ms")
         }
     }
 
@@ -629,6 +714,160 @@ Common flags: --compact / -q / --quiet.
         return if (r.exitCode == 0) {
             okEnvelope(JSONObject().put("displayId", id).put("x", x).put("y", y), args)
         } else errEnvelope("OPERATION_FAILED", "input tap failed: ${r.combined.take(300)}", args)
+    }
+
+    // ── text / find: typed input + UI locating on a virtual display ────────
+
+    /**
+     * `text <displayId> <text>` — type [text] on the display. Routed to
+     * the Shizuku shell host's dual path ([MinisShellClient.injectText]:
+     * KeyCharacterMap virtual keyboard first — the CJK/Unicode answer —
+     * then shell `input -d <displayId> text`, ASCII only). This entry is
+     * the CLI front of that host method: no re-implementation of the
+     * injection logic.
+     *
+     * Honest `method` field: the host's `injectText` returns a bare
+     * Boolean, so which of the two paths actually ran is not reachable
+     * here — the envelope reports `method: "unknown"` (the "keycharmap" /
+     * "input_text" / "both" variants would need an AIDL return change,
+     * which is deliberately out of scope for this P0 surface).
+     */
+    private fun text(args: OffloadArgs): NativeOffloadResult {
+        val id = args.positional.getOrNull(0)?.toIntOrNull()
+            ?: return errEnvelope("INVALID_ARGS", "usage: $TOOL text <displayId> <text>", args)
+        val text = args.positional.getOrNull(1)
+            ?: return errEnvelope("INVALID_ARGS", "usage: $TOOL text <displayId> <text>", args)
+        if (text.isEmpty()) return errEnvelope("INVALID_ARGS", "<text> must not be empty", args)
+        // Only managed virtual displays (same guard as `tap`): the host's
+        // ownDisplay check would refuse the rest anyway, but naming the
+        // real blocker up front is cheaper.
+        MinisAgentDisplayManager.get(id)
+            ?: return errEnvelope("VD_NOT_FOUND",
+                "no active virtual display $id; `create` it first " +
+                    "(the shell host can only type on a display it owns)", args)
+        val ok = MinisShellClient.injectText(id, text)
+        return okEnvelope(
+            JSONObject()
+                .put("displayId", id)
+                .put("ok", ok)
+                .put("method", "unknown")
+                .put("len", text.length),
+            args,
+        )
+    }
+
+    /**
+     * `find <displayId> <text> [--type node|image]` — locate [text] in
+     * the display's a11y tree. Display-scoped window access is
+     * [MinisAccessibilityService.rootsForDisplay] (the P0 virtual-display
+     * surface: `windowsOnAllDisplays[displayId]` on API 30+; the service
+     * file needed no change — the accessor already exists, so `find` is
+     * built on it, not around it).
+     *
+     * Match rules (DFS over every root, up to 5 matches per type):
+     *   node  — the node's text OR contentDescription CONTAINS [text];
+     *   image — the node's className contains "Image" OR its
+     *           contentDescription CONTAINS [text].
+     *
+     * Honest boundary (front risk, measured behaviour): when the a11y
+     * service is not running, OR the display has NO window in the
+     * service's `getWindowsOnAllDisplays()` (untrusted virtual displays
+     * may be invisible to the user-0 a11y service — UNMEASURED), this
+     * returns `A11Y_DISPLAY_NOT_VISIBLE`. It never fabricates matches:
+     * fall back to `shot` + visual locating.
+     */
+    private fun find(args: OffloadArgs): NativeOffloadResult {
+        val id = args.positional.getOrNull(0)?.toIntOrNull()
+            ?: return errEnvelope("INVALID_ARGS", "usage: $TOOL find <displayId> <text> [--type node|image]", args)
+        val text = args.positional.getOrNull(1)
+            ?: return errEnvelope("INVALID_ARGS", "usage: $TOOL find <displayId> <text> [--type node|image]", args)
+        val type = args.get("type") ?: "node"
+        if (type != "node" && type != "image") {
+            return errEnvelope("INVALID_ARGS", "--type must be node or image (got '$type')", args)
+        }
+        val svc = MinisAccessibilityService.getInstance()
+            ?: return errEnvelope(
+                "A11Y_DISPLAY_NOT_VISIBLE",
+                "the a11y service is not running, so no window of display $id is readable " +
+                    "(该屏窗口对 a11y 不可见，退回 shot+视觉定位). Enable Settings → Accessibility " +
+                    "→ Minis, or locate visually: $TOOL shot $id", args,
+            )
+        val roots = svc.rootsForDisplay(id)
+        if (roots.isEmpty()) {
+            return errEnvelope(
+                "A11Y_DISPLAY_NOT_VISIBLE",
+                "display $id has no window in the a11y service's getWindows() " +
+                    "(an untrusted virtual display may be invisible to the user-0 a11y service — " +
+                    "unmeasured ROM behaviour). 该屏窗口对 a11y 不可见，退回 shot+视觉定位: " +
+                    "$TOOL shot $id", args,
+            )
+        }
+        val matches = findNodes(roots, text, type)
+        val payload = JSONObject()
+            .put("displayId", id)
+            .put("text", text)
+            .put("type", type)
+            .put("matches", matches)
+        if (matches.isEmpty()) {
+            payload.put("hint", "text not found in a11y tree of display $id; try shot + visual")
+        }
+        return okEnvelope(payload, args)
+    }
+
+    /**
+     * DFS over [roots] with the spec's match rules; at most 5 matches,
+     * bounded depth (60) so a pathological tree can't wedge the call.
+     * Iterative (explicit stack) — a11y trees can be deep on a busy app.
+     */
+    private fun findNodes(
+        roots: List<android.view.accessibility.AccessibilityNodeInfo>,
+        text: String,
+        type: String,
+    ): JSONArray {
+        val out = JSONArray()
+        // Iterative DFS (explicit node+depth stack) — a11y trees can be
+        // deep on a busy app, and the depth bound (60) stops a
+        // pathological tree from wedging the call.
+        val stack = ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>()
+        val depthStack = ArrayDeque<Int>()
+        for (r in roots) {
+            stack.addLast(r)
+            depthStack.addLast(0)
+        }
+        while (stack.isNotEmpty() && out.length() < 5) {
+            val node = stack.removeLast()
+            val d = depthStack.removeLast()
+            if (d > 60) continue
+            val matched = if (type == "node") {
+                node.text?.toString()?.contains(text) == true ||
+                    node.contentDescription?.toString()?.contains(text) == true
+            } else {
+                (node.className?.toString() ?: "").contains("Image", ignoreCase = true) ||
+                    (node.contentDescription?.toString() ?: "").contains(text)
+            }
+            if (matched) out.put(nodeToMatchJson(node))
+            for (i in 0 until node.childCount) {
+                runCatching { node.getChild(i) }.getOrNull()?.let {
+                    stack.addLast(it)
+                    depthStack.addLast(d + 1)
+                }
+            }
+        }
+        return out
+    }
+
+    /** The 5-field match shape: text, className, bounds{x,y,w,h}, clickX, clickY (center). */
+    private fun nodeToMatchJson(n: android.view.accessibility.AccessibilityNodeInfo): JSONObject {
+        val rect = android.graphics.Rect()
+        n.getBoundsInScreen(rect)
+        return JSONObject()
+            .put("text", n.text?.toString() ?: n.contentDescription?.toString() ?: "")
+            .put("className", n.className?.toString() ?: "")
+            .put("bounds", JSONObject()
+                .put("x", rect.left).put("y", rect.top)
+                .put("w", rect.width()).put("h", rect.height()))
+            .put("clickX", rect.centerX())
+            .put("clickY", rect.centerY())
     }
 
     // ── envelope helpers (same shape as the sibling handlers) ─────────────

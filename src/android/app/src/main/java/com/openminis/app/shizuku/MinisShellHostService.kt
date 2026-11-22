@@ -128,6 +128,11 @@ class MinisShellHostService : IMinisShell.Stub {
         delegate.releaseAll()
     }
 
+    override fun launchedApp(displayId: Int): String? {
+        requireCaller()
+        return delegate.launchedApp(displayId)
+    }
+
     /**
      * Defense in depth: the binder only ever reaches the Minis app through
      * Shizuku, but refuse anyone else outright (Mika's destroy-guard shape,

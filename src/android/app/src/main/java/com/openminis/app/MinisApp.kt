@@ -326,6 +326,29 @@ class MinisApp : Application(), ImageLoaderFactory {
         // the exact launch where the user is trying to read the crash files.
         AppLogger.primeContext(this)
 
+        // [T-vd-island-resident] App-upgrade backstop: an in-place upgrade
+        // must not leave the PREVIOUS build's 9001/9002 notifications mixed
+        // with the new island style. A sticky foreground revival re-posts
+        // its own notification from onStartCommand within the 5 s FG
+        // window, so cancelling here only clears the stale copy.
+        runCatching { com.openminis.app.service.AgentForegroundService.cancelLegacyNotifications(this) }
+
+        // [T-vd-island-resident] Resident island while a virtual display is
+        // live but no agent task runs (the user is simply viewing a
+        // backgrounded app on it — the MIUI 超灵动岛 must not go blank).
+        // The listener lives for the process; it only STARTS the service
+        // (via the existing start-guard, which logs and continues when the
+        // system refuses a background start). While the service is alive
+        // its own display-change listener refreshes/stops it, so this one
+        // no-ops in that case.
+        runCatching {
+            com.openminis.app.display.MinisAgentDisplayManager.addChangeListener {
+                if (com.openminis.app.service.AgentForegroundService.isAlive) return@addChangeListener
+                if (com.openminis.app.display.MinisAgentDisplayManager.list().isEmpty()) return@addChangeListener
+                com.openminis.app.service.AgentForegroundService.startService(this, 0, "vd-resident")
+            }
+        }
+
         // [T-codex-fast-mode] Capture the app context + warm the Fast Mode
         // flag cache so the provider layer (no Context) can read it at
         // request-build time — including offload / title-gen calls that
