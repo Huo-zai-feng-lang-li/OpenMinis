@@ -331,7 +331,7 @@ class MinisApp : Application(), ImageLoaderFactory {
         // with the new island style. A sticky foreground revival re-posts
         // its own notification from onStartCommand within the 5 s FG
         // window, so cancelling here only clears the stale copy.
-        runCatching { com.openminis.app.service.AgentForegroundService.cancelLegacyNotifications(this) }
+
 
         // [T-vd-island-resident] Resident island while a virtual display is
         // live but no agent task runs (the user is simply viewing a
