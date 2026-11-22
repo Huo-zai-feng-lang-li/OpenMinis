@@ -476,6 +476,9 @@ object ScheduledAgentRunner {
             prompt = task.prompt, then = com.openminis.app.agent.jobs.AgentJobThen.FollowUpParent(null),
         )
         registry.setTierUsed(job.id, resolution.tierUsed.wire)
+        // [T-subagent-pill] Same stamp as the delegate path: the pill names
+        // the model from the moment the scheduled child starts.
+        registry.setModelLabel(job.id, resolution.modelLabel)
         withContext(Dispatchers.Main) {
             val parentVm = HeadlessChatRunner.viewModelFor(app, parentSid)
             // [T-android-vm-store-dual-pool] The CHILD is tagged; `parentVm`

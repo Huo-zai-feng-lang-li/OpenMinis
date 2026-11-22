@@ -14506,6 +14506,10 @@ class ChatViewModel(
         registry.registerInterruptedCounter(parentSid) { countInterruptedChildren(parentSid) }
         registry.setTierUsed(job.id, resolution.tierUsed.wire)
         registry.setProgressLevel(job.id, if (args.wait) "none" else args.progressLevel)
+        // [T-subagent-pill] The label is known HERE — at dispatch, from the
+        // resolution — so the pinned pill shows "策略 · 模型 · tier" the
+        // moment the run starts, not after it.
+        registry.setModelLabel(job.id, resolution.modelLabel)
 
         // ── Child vm: helper config, no memory, parent's browser tabs ───
         val childVm = withContext(Dispatchers.Main) {
@@ -14588,6 +14592,9 @@ class ChatViewModel(
         // still `running` later with no live run reads as `interrupted`.
         com.openminis.app.agent.jobs.SubAgentTerminationStore.shared.begin(child.id, job.id, parentSid)
         AppLogger.info(TAG, "[delegate_task] START job=${job.id.take(8)} child=${child.id.take(8)} parent=${parentSid.take(8)} tier=${resolution.tierUsed.wire} model=${resolution.modelLabel} budget=${args.minutes}m wait=${args.wait} progress=${args.progressLevel}")
+        // [T-subagent-pill] Live "第 N 轮" for the pinned pill, both modes —
+        // the progress reporter only runs for frequent/moderate levels.
+        startRoundTracker(job.id, childVm)
 
         // ── Background mode: return now, report back later ───────────────
         if (!args.wait) {
@@ -14938,6 +14945,31 @@ class ChatViewModel(
         )
         AppLogger.info(TAG, "[delegate_task] BACKGROUND START job=${jobId.take(8)} child=${childId.take(8)} budget=${args.minutes}m converted=$converted")
         return ToolExecutionResult(json, true, toolTitle = title)
+    }
+
+    /**
+     * [T-subagent-pill] Feed the pinned pill's "第 N 轮" counter: the child's
+     * assistant-turn count, written into AgentJobRegistry.roundCount every 2 s
+     * while the job is active. In-memory read only ([childLiveMessages]) —
+     * no DB access on the tick — and the loop exits when the job closes, so
+     * nothing leaks. Runs for wait AND background modes; the progress
+     * reporter below only ever runs for frequent/moderate levels.
+     */
+    private fun startRoundTracker(jobId: String, childVm: ChatViewModel) {
+        viewModelScope.launch(Dispatchers.Default) {
+            var last = -1
+            while (isActive) {
+                delay(2_000L)
+                val registry = com.openminis.app.agent.jobs.AgentJobRegistry
+                val job = registry.job(jobId) ?: return@launch
+                if (!job.isActive) return@launch
+                val turns = childLiveMessages(childVm).count { it.role == "assistant" }
+                if (turns != last) {
+                    last = turns
+                    registry.setRoundCount(jobId, turns)
+                }
+            }
+        }
     }
 
     /**

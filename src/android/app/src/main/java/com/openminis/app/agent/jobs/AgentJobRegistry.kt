@@ -145,6 +145,19 @@ data class AgentJob(
     val startedAtMs: Long? = null,
     val finishedAtMs: Long? = null,
     val resultText: String? = null,
+    /**
+     * [T-subagent-pill] The RESOLVED model's display label
+     * (e.g. "Agnes 3.0 Flash (Ultra)"), stamped once when the run starts —
+     * before any progress exists — so the pinned pill can name the model
+     * strategy immediately. `null` for jobs that predate the field.
+     */
+    val modelLabel: String? = null,
+    /**
+     * [T-subagent-pill] Live assistant-turn count of the child ("第 N 轮"
+     * on the pill), refreshed by the runner while the job is active and
+     * frozen at the last value on finish. `null` until the first tick.
+     */
+    val roundCount: Int? = null,
 ) {
     val isActive: Boolean get() = state == AgentJobState.RUNNING || state == AgentJobState.PENDING
     val elapsedMs: Long?
@@ -552,6 +565,10 @@ object AgentJobRegistry {
 
     /** [T-sub-agents-v1] Record where this run's model came from. */
     fun setModelOrigin(jobId: String, origin: String) { update(jobId) { it.copy(modelOrigin = origin) } }
+    /** [T-subagent-pill] Record the resolved model's display label, at start. */
+    fun setModelLabel(jobId: String, label: String) { update(jobId) { it.copy(modelLabel = label) } }
+    /** [T-subagent-pill] Refresh the live assistant-turn count for the pill. */
+    fun setRoundCount(jobId: String, round: Int) { update(jobId) { it.copy(roundCount = round) } }
     fun setProgressLevel(jobId: String, level: String) { update(jobId) { it.copy(progressLevel = level) } }
     fun setSummaryLine(jobId: String, line: String) { update(jobId) { it.copy(summaryLine = line) } }
     fun setCompletionHook(jobId: String, hook: (AgentJob) -> Unit) { completionHooks[jobId] = hook }
