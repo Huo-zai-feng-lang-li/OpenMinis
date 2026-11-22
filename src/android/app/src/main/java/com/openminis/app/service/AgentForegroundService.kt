@@ -1606,10 +1606,11 @@ class AgentForegroundService : Service() {
                 // session's metadata artwork.
                 Notification.MediaStyle()
                     .setMediaSession(islandMediaSession(stopIntent).sessionToken)
-                    .setShowPlayButton(false)
-                    .setShowPauseButton(false)
-                    .setShowPrevButton(false)
-                    .setShowNextButton(false),
+                    // API 36's MediaStyle kept only setShowActionsInCompactView
+                    // (verified against the platform-36 stubs with javap): zero
+                    // compact media buttons - the Stop control is the
+                    // Notification.Action row below, like a plain FGS action.
+                    .setShowActionsInCompactView(),
             )
         largeIcon?.let { mediaBuilder.setLargeIcon(it) }
         if (!isCompleted) {
