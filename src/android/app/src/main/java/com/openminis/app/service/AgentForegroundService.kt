@@ -1609,12 +1609,22 @@ class AgentForegroundService : Service() {
         mediaBuilder.addExtras(android.os.Bundle().apply {
             putBoolean(EXTRA_REQUEST_PROMOTED_ONGOING, true)
         })
-        val mediaNotification = mediaBuilder.build()
-        if (mediaNotification.hasPromotableCharacteristics()) {
-            Log.d(TAG, "promoted notification OK (media variant)")
+        // [T-island-media-always] MIUI's dark media-island card is driven by
+        // the media category/style itself - NOT by hasPromotableCharacteristics
+        // (the status-bar chip is a bonus surface). 1.30/1.31 gated the
+        // media variant on that check and THREW IT AWAY on this device,
+        // leaving the white ProgressStyle card the user reported. Always
+        // post the media variant; the ProgressStyle builder below is now
+        // only the construction-failure fallback.
+        val mediaNotification = runCatching { mediaBuilder.build() }.getOrNull()
+        if (mediaNotification != null) {
+            Log.d(
+                TAG,
+                "media variant posted - promotable=${mediaNotification.hasPromotableCharacteristics()}",
+            )
             return mediaNotification
         }
-        Log.d(TAG, "island media variant not promotable - ProgressStyle variant")
+        Log.d(TAG, "media variant build failed - ProgressStyle variant")
         val progressStyle = Notification.ProgressStyle()
             .addProgressSegment(Notification.ProgressStyle.Segment(100))
             .setStyledByProgress(false)
