@@ -637,7 +637,14 @@ Common flags: --compact / -q / --quiet.
         }
         val framed = waited.framed
         val waitedMs = SystemClock.elapsedRealtime() - t0
-        val pinnedFinal = MinisShellClient.repinIfNeeded(d.displayId, pkg)
+        // In-process displays are not in the shell host's `displays` map,
+        // so repinIfNeeded (ownDisplay guard) can never see them: report
+        // "not-managed" instead of a meaningless false.
+        val pinnedFinal: Any = if (shellManaged) {
+            MinisShellClient.repinIfNeeded(d.displayId, pkg)
+        } else {
+            "not-managed"
+        }
         AppLogger.info(TAG, "run: display ${d.displayId} $component framed=$framed nudge=$nudgeUsed pinned=$pinnedFinal waitedMs=$waitedMs")
 
         // 4. shot — write what we have. On timeout the frame may be
