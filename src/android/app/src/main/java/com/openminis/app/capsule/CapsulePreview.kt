@@ -21,7 +21,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayCircle
-import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -46,6 +45,7 @@ import com.openminis.app.R
 import com.openminis.app.accessibility.MinisAccessibilityService
 import com.openminis.app.display.MinisAgentDisplayManager
 import com.openminis.app.logging.AppLogger
+import com.openminis.app.shizuku.MinisShellClient
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.conflate
@@ -298,10 +298,9 @@ object MinisCapsule {
 /**
  * The capsule card: drag-anywhere live preview of virtual display
  * [displayId]. Tap the frame to expand into the fullscreen PiP
- * ([VdAgentPip]). Top bar: back / mute / pause-eye / close — back and mute
- * are UI placeholders (the virtual display's audio and "back" semantics are
- * handled by the agent flow, not the capsule); × hides the capsule; the
- * eye freezes/releases the frame stream.
+ * ([VdAgentPip]). Top bar: back / pause-eye / close — back injects
+ * KEYCODE_BACK into the virtual display via the shell host; × hides the
+ * capsule; the eye freezes/releases the frame stream.
  */
 @Composable
 fun CapsuleContent(displayId: Int) {
@@ -368,9 +367,9 @@ fun CapsuleContent(displayId: Int) {
                 modifier = Modifier.weight(1f),
             )
             CapsuleButton(Icons.AutoMirrored.Filled.ArrowBack,
-                stringResource(R.string.capsule_vd_btn_back)) { /* placeholder */ }
-            CapsuleButton(Icons.Filled.VolumeOff,
-                stringResource(R.string.capsule_vd_btn_mute)) { /* placeholder */ }
+                stringResource(R.string.capsule_vd_btn_back)) {
+                MinisShellClient.injectKey(displayId, 4) // KEYCODE_BACK
+            }
             CapsuleButton(
                 if (paused) Icons.Filled.PlayCircle else Icons.Filled.Pause,
                 stringResource(R.string.capsule_vd_btn_pause)
