@@ -228,6 +228,9 @@ class AgentForegroundService : Service() {
 
     // [T-android-live-update-chip] See ensureChipTicker().
     private var chipTickerJob: Job? = null
+    // [T-island-media] Media-variant plumbing (API 36 island branch only).
+    private var islandMediaSessionRef: android.media.session.MediaSession? = null
+    @Volatile private var islandLargeIconCache: android.graphics.Bitmap? = null
     private var lingerJob: Job? = null
 
     // [T-android-overlay-completion-pending] X9: linger a completed-state
@@ -496,6 +499,9 @@ class AgentForegroundService : Service() {
         } catch (_: Throwable) {}
         overlayController = null
         overlayScope.cancel()
+        // [T-island-media] Drop the island's MediaSession with the service.
+        islandMediaSessionRef?.let { runCatching { it.setCallback(null); it.release() } }
+        islandMediaSessionRef = null
         super.onDestroy()
         Log.d(TAG, "Service destroyed")
     }
@@ -1030,8 +1036,20 @@ class AgentForegroundService : Service() {
                 } else {
                     if (!isPromotedChipActive()) break
                     // [T-android-user-ask-chip] A question with no deadline
-                    // shows a static "?"; nothing to tick.
-                    askingNow()?.let { if (it.expiresAtMs == null) return@launch }
+                    // shows a static "?"; nothing to tick. A question WITH a
+                    // deadline ticks its per-second countdown.
+                    val asking = askingNow()
+                    if (asking != null && asking.expiresAtMs == null) return@launch
+                    // [T-island-jitter] RUNNING carries no re-post duty: the
+                    // chip's timer is a system Chronometer (setUsesChronometer
+                    // on the promoted builder) that SystemUI ticks locally,
+                    // and shortCritical is null while running, so there is
+                    // nothing for a per-second notify() to change. The old
+                    // 1 s re-post made SystemUI re-compose the island card
+                    // mid-expand — the reported stutter. Content changes
+                    // (tool / phase / done) re-post through their own
+                    // dispatches, not this loop.
+                    if (asking == null) break
                     CHIP_TICK_MS
                 }
                 delay(delayMs)
@@ -1411,25 +1429,26 @@ class AgentForegroundService : Service() {
             askExpiresWallMs = asking?.expiresAtMs,
         )
 
-        // [T-android-live-update-chip] Short critical text — the ≤7-char
-        // string the Android 16 status-bar chip shows next to the small icon.
-        // Always the elapsed timer: while running it is refreshed once a
-        // second by ensureChipTicker(), when completed it freezes at the run
-        // duration. It used to be null while running so the chronometer
-        // could own the clock; ColorOS 16 then fell back to rendering the
-        // full content title in the chip, which is the stretched pill the
-        // user recorded. With the timer always present the chip is
-        // [tool glyph][m:ss] on every skin — the same compact shape as the
-        // iOS Dynamic Island and the system screen-recorder chip.
-        // [T-port-sched-wait-notification] WAITING: minutes left to the run
-        // (re-posted once a minute by ensureChipTicker), else the run counter.
+        // [T-android-live-update-chip] Short critical text — the string the
+        // Android 16 status-bar chip shows next to the small icon. WAITING
+        // shows the minutes left (re-posted once a minute by
+        // ensureChipTicker); ASKING the time left to answer; COMPLETED
+        // freezes at the run duration via the chronometer's when.
+        // [T-island-jitter] RUNNING shows NOTHING: while a chip text is
+        // present the system prefers it over the chronometer, which forced a
+        // once-a-second re-post to keep the timer live — and that re-post
+        // re-composed the island card mid-expand (the reported stutter).
+        // Null hands the clock to the system Chronometer, which ticks
+        // locally with zero notify() traffic. (ColorOS 16 once fell back to
+        // the full content title when the text was null; if that regresses
+        // on a tested skin, re-arm a COARSE ticker — not the 1 s one.)
         val shortCritical = when (phase) {
             AgentPhase.WAITING -> waitChipText(scheduledWait?.nextRunMs?.let { it - nowWallMs })
                 ?: scheduledWait?.runCounter
                 ?: "…"
             // [T-android-user-ask-chip] Time left to answer.
             AgentPhase.ASKING -> askChipText(asking?.expiresAtMs?.let { it - nowWallMs })
-            else -> chipTimerText(elapsedMs)
+            else -> null
         }
 
         // [T-android-dynamic-island] Tier 3: Android 16 (Baklava) Live Updates.
@@ -1472,6 +1491,7 @@ class AgentForegroundService : Service() {
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(smallIcon)
+            .setLargeIcon(islandLargeIcon())
             .setContentTitle(titleText)
             .setContentText(collapsedText)
             .setStyle(NotificationCompat.BigTextStyle().bigText(collapsedText))
@@ -1527,7 +1547,7 @@ class AgentForegroundService : Service() {
     private fun buildPromotedNotification(
         titleText: String,
         collapsedText: String,
-        shortCritical: String,
+        shortCritical: String?,
         smallIcon: Int,
         isToolRunning: Boolean,
         isCompleted: Boolean,
@@ -1555,6 +1575,56 @@ class AgentForegroundService : Service() {
         // stops it drawing as a position tracker, and clearing the tracker icon
         // removes the plane. The two states are carried by the title, the icon
         // and the elapsed timer, which is where a user actually reads them.
+        // [T-island-media] MIUI renders MEDIA notifications (MediaStyle +
+        // CATEGORY_MEDIA + album art) with its dark-glass HyperIsland
+        // treatment - the music-app look - while a promoted ProgressStyle
+        // card comes out as the plain white "native" card. Build the media
+        // variant first and keep it only while it still qualifies for
+        // promotion (hasPromotableCharacteristics below); anything else
+        // falls through to the ProgressStyle variant, which keeps the chip.
+        val largeIcon = islandLargeIcon()
+        val mediaBuilder = Notification.Builder(this, CHANNEL_ID)
+            .setSmallIcon(smallIcon)
+            .setContentTitle(titleText)
+            .setContentText(collapsedText)
+            .setOngoing(true)
+            .setShowWhen(clock.showWhen)
+            .setWhen(clock.whenMs)
+            .setUsesChronometer(clock.usesChronometer)
+            .setChronometerCountDown(clock.countDown)
+            .setOnlyAlertOnce(true)
+            .setContentIntent(contentIntent)
+            .setColorized(false)
+            .setCategory(Notification.CATEGORY_MEDIA)
+            .setStyle(
+                Notification.MediaStyle()
+                    .setMediaSession(islandMediaSession(stopIntent).sessionToken)
+                    .setMediaContentTitle(titleText)
+                    .setMediaContentDescription(collapsedText)
+                    .setShowPlayButton(false)
+                    .setShowPauseButton(false)
+                    .setShowPrevButton(false)
+                    .setShowNextButton(false),
+            )
+        largeIcon?.let { mediaBuilder.setLargeIcon(it) }
+        if (!isCompleted) {
+            mediaBuilder.addAction(
+                Notification.Action.Builder(
+                    Icon.createWithResource(this, android.R.drawable.ic_media_pause),
+                    getString(R.string.bg_service_stop_action),
+                    stopIntent,
+                ).build(),
+            )
+        }
+        mediaBuilder.addExtras(android.os.Bundle().apply {
+            putBoolean(EXTRA_REQUEST_PROMOTED_ONGOING, true)
+        })
+        val mediaNotification = mediaBuilder.build()
+        if (mediaNotification.hasPromotableCharacteristics()) {
+            Log.d(TAG, "promoted notification OK (media variant)")
+            return mediaNotification
+        }
+        Log.d(TAG, "island media variant not promotable - ProgressStyle variant")
         val progressStyle = Notification.ProgressStyle()
             .addProgressSegment(Notification.ProgressStyle.Segment(100))
             .setStyledByProgress(false)
@@ -1567,6 +1637,7 @@ class AgentForegroundService : Service() {
             .setContentTitle(titleText)
             .setContentText(collapsedText)
             .setStyle(progressStyle)
+            .apply { largeIcon?.let { setLargeIcon(it) } }
             .setOngoing(true)
             // [T-android-notification-chronometer] Same rule as the compat
             // branch — the promoted chip is precisely where a frozen clock was
@@ -1584,7 +1655,7 @@ class AgentForegroundService : Service() {
         // [T-android-notification-chronometer] Only when non-null: while
         // running the chronometer owns the clock, and a second stale copy of
         // the same number would contradict it.
-        builder.setShortCriticalText(shortCritical)
+        if (shortCritical != null) builder.setShortCriticalText(shortCritical)
 
         // [T-android-live-update-completed] "Stop" is meaningless once the task
         // has finished — there is nothing left to stop, and offering it invites
@@ -1635,4 +1706,48 @@ class AgentForegroundService : Service() {
         }
         return notification
     }
+
+    /**
+     * [T-island-media] The island's media variant "album art": the app's
+     * launcher icon, centre-cropped to a square and shown where a media card
+     * shows artwork. Decoded once per process.
+     */
+    private fun islandLargeIcon(): android.graphics.Bitmap? {
+        islandLargeIconCache?.let { return it }
+        val bmp = runCatching {
+            val iconRes = packageManager.getApplicationInfo(applicationContext.packageName, 0).iconRes
+            if (iconRes == 0) return@runCatching null
+            val decoded = android.graphics.BitmapFactory.decodeResource(applicationContext.resources, iconRes)
+                ?: return@runCatching null
+            val side = minOf(decoded.width, decoded.height)
+            android.graphics.Bitmap.createBitmap(decoded, (decoded.width - side) / 2, (decoded.height - side) / 2, side, side)
+        }.getOrNull() ?: return null
+        islandLargeIconCache = bmp
+        return bmp
+    }
+
+    /**
+     * [T-island-media] The MediaSession behind the media variant: the system
+     * reads its metadata for the artwork and routes the compact stop control
+     * back into our stop PendingIntent.
+     */
+    private fun islandMediaSession(stopIntent: PendingIntent): android.media.session.MediaSession {
+        val session = islandMediaSessionRef
+            ?: android.media.session.MediaSession(applicationContext, "MinisAgentIsland")
+                .also { islandMediaSessionRef = it }
+        session.setCallback(object : android.media.session.MediaSession.Callback() {
+            override fun onStop() {
+                runCatching { stopIntent.send() }
+            }
+        })
+        runCatching {
+            val art = islandLargeIcon()
+            session.setMetadata(android.media.MediaMetadata.Builder()
+                .putString(android.media.MediaMetadata.METADATA_KEY_ARTIST, "Minis")
+                .apply { art?.let { putBitmap(android.media.MediaMetadata.METADATA_KEY_ALBUM_ART, it) } }
+                .build())
+        }
+        return session
+    }
 }
+
