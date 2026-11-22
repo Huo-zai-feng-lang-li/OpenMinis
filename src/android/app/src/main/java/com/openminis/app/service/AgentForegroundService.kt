@@ -1595,12 +1595,17 @@ class AgentForegroundService : Service() {
             .setOnlyAlertOnce(true)
             .setContentIntent(contentIntent)
             .setColorized(false)
-            .setCategory(NotificationCompat.CATEGORY_MEDIA)
+            // [T-island-media] The raw category string: the constant lives on
+            // androidx NotificationCompat, whose version here does not carry
+            // it - the literal is the same value.
+            .setCategory("android.app-notification-category-media")
             .setStyle(
+                // The platform MediaStyle has no setMediaContentTitle/
+                // Description (those are androidx additions) - the title and
+                // subtitle come from the builder's content title/text and the
+                // session's metadata artwork.
                 Notification.MediaStyle()
                     .setMediaSession(islandMediaSession(stopIntent).sessionToken)
-                    .setMediaContentTitle(titleText)
-                    .setMediaContentDescription(collapsedText)
                     .setShowPlayButton(false)
                     .setShowPauseButton(false)
                     .setShowPrevButton(false)
