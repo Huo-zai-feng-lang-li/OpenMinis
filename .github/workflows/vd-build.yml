@@ -87,19 +87,24 @@ jobs:
           ls -la dist/
 
 
-      - name: Publish release (in-app update protocol, tag 1.28)
+      - name: Publish release (in-app update protocol, tag from gradle)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           apk=$(find dist -name '*.apk' | head -1)
-          out="MinisApp-1.28-build59-arm64-v8a.apk"
+          # [fix-release-tag] The tag was hardcoded (1.28), so every later
+          # build clobbered the 1.28 release and the in-app update check
+          # never saw the new version. Read it from the gradle source.
+          ver=$(grep -oP 'versionName = "\K[^"]+' src/android/app/build.gradle.kts | head -1)
+          build=$(grep -oP 'versionCode = \K[0-9]+' src/android/app/build.gradle.kts | head -1)
+          out="MinisApp-${ver}-build${build}-arm64-v8a.apk"
           cp "$apk" "$out"
-          if gh release view 1.28 >/dev/null 2>&1; then
-            gh release upload 1.28 "$out" --clobber
+          if gh release view "$ver" >/dev/null 2>&1; then
+            gh release upload "$ver" "$out" --clobber
           else
-            gh release create 1.28 \
-              --title "Minis 1.28 (build 59, SubAgentPill + session-bound capsule + repin fix)" \
-              --notes "New: SubAgentPill pinned at chat top (model info + timer + pause), virtual display capsule session-bound, moveTask am fallback (repin works in shell mode), visibleOnMainScreen fixed, 8 reflection type fixes, P2 batch (text errEnvelope, a11y recycle, cold-restart guard, taskId refresh). Perf build; in-place update over 1.26." "$out"
+            gh release create "$ver" \
+              --title "Minis ${ver} (build ${build})" \
+              --notes "See the feature/virtual-display commit log for this build." "$out"
           fi
 
       - uses: actions/upload-artifact@v4
