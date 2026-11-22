@@ -335,7 +335,7 @@ internal class MinisShellDisplay(
     private fun displayGroup(displayId: Int): Int? = runCatching {
         val global = Class.forName("android.hardware.display.DisplayManagerGlobal")
             .getMethod("getInstance").invoke(null)!!
-        val info = global.javaClass.getMethod("getDisplayInfo", Int::class.java).invoke(global, displayId)!!
+        val info = global.javaClass.getMethod("getDisplayInfo", Int::class.javaPrimitiveType!!).invoke(global, displayId)!!
         info.javaClass.getField("displayGroupId").getInt(info)
     }.getOrNull()
 
@@ -352,7 +352,7 @@ internal class MinisShellDisplay(
             val wm = Class.forName("android.view.WindowManagerGlobal")
                 .getMethod("getWindowManagerService").invoke(null)!!
             // WindowConfiguration.WINDOWING_MODE_FULLSCREEN = 1 (hidden constant)
-            wm.javaClass.getMethod("setWindowingMode", Int::class.java, Int::class.java)
+            wm.javaClass.getMethod("setWindowingMode", Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)
                 .invoke(wm, displayId, 1)
         }.onFailure {
             Log.w(TAG, "setWindowingMode failed, falling back to wm", it)
@@ -368,7 +368,7 @@ internal class MinisShellDisplay(
         runCatching {
             val wm = Class.forName("android.view.WindowManagerGlobal")
                 .getMethod("getWindowManagerService").invoke(null)!!
-            wm.javaClass.getMethod("setDisplayImePolicy", Int::class.java, Int::class.java)
+            wm.javaClass.getMethod("setDisplayImePolicy", Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)
                 .invoke(wm, displayId, IME_POLICY_LOCAL)
         }.onFailure { Log.w(TAG, "setDisplayImePolicy failed", it) }
     }
@@ -553,7 +553,7 @@ internal class MinisShellDisplay(
      * enforced by the caller).
      */
     private fun userFlagsOk(um: UserManager, userId: Int): Boolean = runCatching {
-        val info = um.javaClass.getMethod("getUserInfo", Int::class.javaPrimitiveType).invoke(um, userId)
+        val info = um.javaClass.getMethod("getUserInfo", Int::class.javaPrimitiveType!!).invoke(um, userId)
         val flags = info.javaClass.getField("flags").getInt(info)
         flags and 0x3A == 0
     }.getOrElse {
@@ -845,9 +845,9 @@ internal class MinisShellDisplay(
     @SuppressLint("PrivateApi")
     private fun inject(event: InputEvent, displayId: Int, waitForFinish: Boolean = false): Boolean =
         try {
-            event.javaClass.getMethod("setDisplayId", Int::class.java).invoke(event, displayId)
+            event.javaClass.getMethod("setDisplayId", Int::class.javaPrimitiveType!!).invoke(event, displayId)
             val manager = inputManager()
-            manager.javaClass.getMethod("injectInputEvent", InputEvent::class.java, Int::class.java)
+            manager.javaClass.getMethod("injectInputEvent", InputEvent::class.java, Int::class.javaPrimitiveType!!)
                 .invoke(manager, event, injectMode(event is KeyEvent, waitForFinish)) as Boolean
         } catch (t: Throwable) {
             Log.w(TAG, "injectInputEvent failed", t)
@@ -861,10 +861,10 @@ internal class MinisShellDisplay(
      */
     @SuppressLint("PrivateApi")
     private fun injectTo(event: InputEvent, displayId: Int, targetUid: Int): Boolean = try {
-        event.javaClass.getMethod("setDisplayId", Int::class.java).invoke(event, displayId)
+        event.javaClass.getMethod("setDisplayId", Int::class.javaPrimitiveType!!).invoke(event, displayId)
         val manager = inputManager()
         manager.javaClass.getMethod(
-            "injectInputEvent", InputEvent::class.java, Int::class.java, Int::class.java,
+            "injectInputEvent", InputEvent::class.java, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!,
         ).invoke(manager, event, INJECT_MODE_WAIT_FOR_FINISH, targetUid) as Boolean
     } catch (t: Throwable) {
         Log.w(TAG, "targeted injectInputEvent failed: ${(t.cause ?: t).javaClass.simpleName}")
