@@ -5,6 +5,7 @@ import android.os.SystemClock
 import com.openminis.app.accessibility.MinisAccessibilityService
 import com.openminis.app.display.AgentDisplayApi
 import com.openminis.app.display.MinisAgentDisplayManager
+import com.openminis.app.display.MinisShellAgentDisplay
 import com.openminis.app.display.VdCreateResult
 import com.openminis.app.logging.AppLogger
 import com.openminis.app.offload.ShizukuManager
@@ -574,8 +575,11 @@ Common flags: --compact / -q / --quiet.
         //     main screen). If it still refuses, the display is useless —
         //     release it and report APP_ESCAPED so the agent can fall back
         //     to main-screen a11y instead of waiting on a black frame.
+        //     Only shell-managed displays support repin (IActivityTaskManager
+        //     path); in-process displays skip this check entirely.
+        val shellManaged = d is MinisShellAgentDisplay
         val pinned0 = (launchOutcome as LaunchResult.Ok).pinned
-        if (!pinned0) {
+        if (shellManaged && !pinned0) {
             Thread.sleep(3_000)
             val rePinned = MinisShellClient.repinIfNeeded(d.displayId, pkg)
             if (!rePinned) {
@@ -587,7 +591,7 @@ Common flags: --compact / -q / --quiet.
                         "(display released). Fall back to main-screen a11y or tell the user.", args)
             }
         }
-        val taskIdNow = MinisShellClient.topTaskId(d.displayId)
+        var taskIdNow = MinisShellClient.topTaskId(d.displayId)
 
         // 3. wait for the first real frame: skip null and black, keep
         //    waiting otherwise.
@@ -613,13 +617,17 @@ Common flags: --compact / -q / --quiet.
                 if (shortFrameWait(d, 5_000L)) nudgeUsed = "keyevent-back"
             }
             if (nudgeUsed.isEmpty()) {
-                shizukuRun(listOf("am", "force-stop", "--user", user, pkg))
-                shizukuRun(listOf("am", "start", "--user", user, "--display", d.displayId.toString(), "-n", component))
-                MinisShellClient.repinIfNeeded(d.displayId, pkg)
-                if (shortFrameWait(d, 8_000L)) nudgeUsed = "cold-restart"
+                // Guard: don't force-stop an app the user has visible on the main screen
+                if (!MinisShellClient.visibleOnMainScreen(pkg, user.toInt())) {
+                    shizukuRun(listOf("am", "force-stop", "--user", user, pkg))
+                    shizukuRun(listOf("am", "start", "--user", user, "--display", d.displayId.toString(), "-n", component))
+                    MinisShellClient.repinIfNeeded(d.displayId, pkg)
+                    if (shortFrameWait(d, 8_000L)) nudgeUsed = "cold-restart"
+                }
             }
             if (nudgeUsed.isNotEmpty()) {
                 waited = FrameWaitResult(true, "first frame via nudge: $nudgeUsed")
+                taskIdNow = MinisShellClient.topTaskId(d.displayId)
             } else {
                 waited = FrameWaitResult(false,
                     "SPLASH_STALLED: tap-center/BACK/cold-restart nudge all tried on display " +
@@ -811,10 +819,20 @@ Common flags: --compact / -q / --quiet.
                 "no active virtual display $id; `create` it first " +
                     "(the shell host can only type on a display it owns)", args)
         val ok = MinisShellClient.injectText(id, text)
+        if (!ok) {
+            // Injection failed on the host (Shizuku down, binder null, …):
+            // report it honestly so the agent's exit-code read is right.
+            return errEnvelope(
+                "TEXT_INJECT_FAILED",
+                "text injection on display $id failed: " +
+                    (MinisShellClient.lastError() ?: "unknown (check `shizuku` subcommand)"),
+                args,
+            )
+        }
         return okEnvelope(
             JSONObject()
                 .put("displayId", id)
-                .put("ok", ok)
+                .put("ok", true)
                 .put("method", "unknown")
                 .put("len", text.length),
             args,
@@ -893,8 +911,18 @@ Common flags: --compact / -q / --quiet.
         // Iterative DFS (explicit node+depth stack) — a11y trees can be
         // deep on a busy app, and the depth bound (60) stops a
         // pathological tree from wedging the call.
+        //
+        // [a11y-recycle] Every node is recycled exactly once, at the
+        // moment it is fully consumed: its match has been captured and
+        // its children obtained via getChild(i) and queued. A child
+        // obtained from getChild is a distinct AccessibilityNodeInfo,
+        // so the parent no longer holds it — recycling the parent right
+        // after queuing children is safe.
         val stack = ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>()
         val depthStack = ArrayDeque<Int>()
+        // Roots belong to the caller (rootsForDisplay); they ride the
+        // same stack and are recycled by the same pass — popped nodes in
+        // the loop, unconsumed ones (incl. roots) in the drain below.
         for (r in roots) {
             stack.addLast(r)
             depthStack.addLast(0)
@@ -902,21 +930,34 @@ Common flags: --compact / -q / --quiet.
         while (stack.isNotEmpty() && out.length() < 5) {
             val node = stack.removeLast()
             val d = depthStack.removeLast()
-            if (d > 60) continue
-            val matched = if (type == "node") {
-                node.text?.toString()?.contains(text) == true ||
-                    node.contentDescription?.toString()?.contains(text) == true
-            } else {
-                (node.className?.toString() ?: "").contains("Image", ignoreCase = true) ||
-                    (node.contentDescription?.toString() ?: "").contains(text)
-            }
-            if (matched) out.put(nodeToMatchJson(node))
-            for (i in 0 until node.childCount) {
-                runCatching { node.getChild(i) }.getOrNull()?.let {
-                    stack.addLast(it)
-                    depthStack.addLast(d + 1)
+            if (d <= 60) {
+                val matched = if (type == "node") {
+                    node.text?.toString()?.contains(text) == true ||
+                        node.contentDescription?.toString()?.contains(text) == true
+                } else {
+                    (node.className?.toString() ?: "").contains("Image", ignoreCase = true) ||
+                        (node.contentDescription?.toString() ?: "").contains(text)
+                }
+                if (matched) out.put(nodeToMatchJson(node))
+                // Queue this node's children first (they are separate
+                // node objects, alive independent of the parent).
+                for (i in 0 until node.childCount) {
+                    runCatching { node.getChild(i) }.getOrNull()?.let { child ->
+                        stack.addLast(child)
+                        depthStack.addLast(d + 1)
+                    }
                 }
             }
+            // Fully consumed: recycle (covers both children and depth-
+            // bounded leaves; roots recycled here when popped).
+            runCatching { node.recycle() }
+        }
+        // The 5-match cap can stop the walk early: drain whatever is
+        // still queued (unconsumed children and unvisited roots) so
+        // nothing from this traversal leaks.
+        while (stack.isNotEmpty()) {
+            runCatching { stack.removeLast().recycle() }
+            depthStack.removeLast()
         }
         return out
     }
