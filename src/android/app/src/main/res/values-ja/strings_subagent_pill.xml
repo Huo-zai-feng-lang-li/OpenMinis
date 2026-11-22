@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- [T-subagent-pill] チャットトップバーのサブエージェントピル（スケジュールドピルの双子）。 -->
+<resources>
+    <string name="subagent_pill_waiting">待機中</string>
+    <string name="subagent_pill_stop">サブエージェントを停止</string>
+    <string name="subagent_pill_hide">このピルを非表示</string>
+    <string name="subagent_pill_stop_confirm_title">このサブエージェントを停止しますか？</string>
+    <string name="subagent_pill_stop_confirm_message">実行はそこで取り消されます。完了済み部分は進捗レポートが届く場合があります。</string>
+    <string name="subagent_pill_stop_confirm">停止</string>
+    <string name="subagent_pill_dialog_title">サブエージェント</string>
+    <string name="subagent_pill_a11y_title">サブエージェント実行中</string>
+    <string name="subagent_pill_a11y_hint">サブエージェントのステータスを開く</string>
+    <string name="subagent_pill_a11y_more">+%1$d 件</string>
+</resources>

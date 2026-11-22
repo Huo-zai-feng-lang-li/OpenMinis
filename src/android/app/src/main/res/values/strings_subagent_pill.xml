@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- [T-subagent-pill] Sub-agent pill under the chat's top bar, the purple twin of the scheduled pill. -->
+<resources>
+    <string name="subagent_pill_waiting">Waiting</string>
+    <string name="subagent_pill_stop">Stop Sub Agent</string>
+    <string name="subagent_pill_hide">Hide This Pill</string>
+    <string name="subagent_pill_stop_confirm_title">Stop this sub agent?</string>
+    <string name="subagent_pill_stop_confirm_message">The run is cancelled where it is. A progress report may still arrive for the work already done.</string>
+    <string name="subagent_pill_stop_confirm">Stop</string>
+    <string name="subagent_pill_dialog_title">Sub agent</string>
+    <string name="subagent_pill_a11y_title">Sub agent running</string>
+    <string name="subagent_pill_a11y_hint">Opens the sub agent status</string>
+    <string name="subagent_pill_a11y_more">+%1$d more</string>
+</resources>
