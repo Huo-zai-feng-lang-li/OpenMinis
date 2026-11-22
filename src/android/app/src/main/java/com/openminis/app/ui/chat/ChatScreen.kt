@@ -3794,17 +3794,7 @@ fun ChatScreen(
             // lane, this chat's live sub agents in the right lane. Each keeps
             // its own 50 % lane and centers in it, so a lone pill never jumps
             // when its twin appears.
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-            ) {
-                Box(modifier = Modifier.weight(1f)) {
-                    ScheduledTaskPill(currentSessionId = { viewModel.currentSessionId })
-                }
-                Box(modifier = Modifier.weight(1f)) {
-                    SubAgentPill(currentSessionId = { viewModel.currentSessionId })
-                }
-            }
+            SubAgentPill(currentSessionId = { viewModel.currentSessionId })
         } },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
