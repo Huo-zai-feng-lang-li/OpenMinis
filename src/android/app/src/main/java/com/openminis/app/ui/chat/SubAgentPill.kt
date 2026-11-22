@@ -189,9 +189,21 @@ private fun SubAgentPillCard(
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
-                .shadow(6.dp, RoundedCornerShape(999.dp))
-                .border(0.75.dp, SubAgentAccent.copy(alpha = 0.35f), RoundedCornerShape(999.dp))
-                .background(SubAgentAccent, RoundedCornerShape(999.dp))
+                // [T-subagent-pill-hollow] Same hollow treatment as the
+                // scheduled pill: surface base, a 6 % accent wash, a 0.75 dp
+                // accent ring on the OUTSIDE (border last so it shows),
+                // accent-coloured text instead of white-on-solid. The
+                // solid-purple capsule was reported as ugly.
+                .shadow(
+                    6.dp,
+                    RoundedCornerShape(999.dp),
+                    clip = false,
+                    ambientColor = Color.Black.copy(alpha = 0.08f),
+                    spotColor = Color.Black.copy(alpha = 0.08f),
+                )
+                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(999.dp))
+                .background(SubAgentAccent.copy(alpha = 0.06f), RoundedCornerShape(999.dp))
+                .border(0.75.dp, SubAgentAccent.copy(alpha = 0.28f), RoundedCornerShape(999.dp))
                 .padding(start = 12.dp, top = 6.dp, bottom = 6.dp, end = 4.dp),
         ) {
             Text("🤖", fontSize = 14.sp, maxLines = 1)
@@ -200,7 +212,7 @@ private fun SubAgentPillCard(
                     finishedLine(job, elapsedMs, round),
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
-                    color = Color.White,
+                    color = SubAgentAccent,
                     maxLines = 1,
                     softWrap = false,
                     modifier = Modifier.padding(start = 7.dp),
@@ -210,7 +222,7 @@ private fun SubAgentPillCard(
                     mmss(elapsedMs),
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color.White,
+                    color = SubAgentAccent,
                     maxLines = 1,
                     modifier = Modifier.padding(start = 7.dp),
                 )
@@ -218,7 +230,7 @@ private fun SubAgentPillCard(
                     if (pending) "排队中" else "第 $round 轮",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
-                    color = Color.White.copy(alpha = 0.85f),
+                    color = SubAgentAccent.copy(alpha = 0.75f),
                     maxLines = 1,
                     modifier = Modifier.padding(start = 8.dp),
                 )
@@ -232,7 +244,7 @@ private fun SubAgentPillCard(
                     Icon(
                         if (paused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
                         contentDescription = null,
-                        tint = if (paused) Color.White else Color.White.copy(alpha = 0.8f),
+                        tint = if (paused) SubAgentAccent else SubAgentAccent.copy(alpha = 0.7f),
                         modifier = Modifier.size(16.dp),
                     )
                 }
