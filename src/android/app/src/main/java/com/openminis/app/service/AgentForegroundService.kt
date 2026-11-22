@@ -1742,7 +1742,7 @@ class AgentForegroundService : Service() {
         // [T-island-media-content] Claim the "playing" state so MIUI's media
         // island shows OUR content instead of the empty "暂无播放" tile.
         session.setPlaybackState(android.media.session.PlaybackState.Builder()
-            .setState(android.media.session.PlaybackState.STATE_PLAYING, 0f, 0f)
+            .setState(android.media.session.PlaybackState.STATE_PLAYING, 0L, 0f)
             .build())
         runCatching {
             val art = islandLargeIcon()
