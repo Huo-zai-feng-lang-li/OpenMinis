@@ -10,6 +10,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
@@ -28,7 +29,9 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -173,6 +176,7 @@ internal fun SubAgentPill(currentSessionId: () -> String) {
     val state = SubAgentPillModel.state(live)
         ?.takeIf { !SubAgentPillModel.isDismissed(liveIds, hidden) }
 
+    var listOpen by remember { mutableStateOf(false) }
     val lifecycleOwner = LocalLifecycleOwner.current
     val shown = state != null
     LaunchedEffect(shown, lifecycleOwner) {
@@ -198,7 +202,7 @@ internal fun SubAgentPill(currentSessionId: () -> String) {
             state = s,
             job = s.job,
             now = now,
-            onOpen = { openStatus = s.job },
+            onOpen = { listOpen = true },
             onHide = {
                 AppLogger.info("SubAgentPill", "hide session=${sessionId.take(8)} jobs=${liveIds.size}")
                 SubAgentPillDismissals.hide(liveIds, sessionId)
@@ -207,6 +211,20 @@ internal fun SubAgentPill(currentSessionId: () -> String) {
         )
     }
 
+    // [T-subagent-list-sheet] The original bottom sheet: one row per live
+    // sub agent (badge + name + status line + purple clock); tapping a row
+    // opens that run's detail dialog (identity + stop).
+    if (listOpen) {
+        SubAgentListSheet(
+            live = live,
+            now = now,
+            onPick = { job ->
+                listOpen = false
+                openStatus = job
+            },
+            onDismiss = { listOpen = false },
+        )
+    }
     openStatus?.let { job ->
         SubAgentStatusDialog(
             job = job,
@@ -234,6 +252,113 @@ internal fun SubAgentPill(currentSessionId: () -> String) {
             },
         )
     }
+}
+
+@Composable
+private fun SubAgentListSheet(
+    live: List<AgentJob>,
+    now: Long,
+    onPick: (AgentJob) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val accent = helperAccent()
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 14.dp),
+        ) {
+            Text(
+                stringResource(R.string.subagent_pill_list_title, live.size),
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            if (live.isEmpty()) {
+                Text(
+                    stringResource(R.string.subagent_pill_list_empty),
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    modifier = Modifier.padding(top = 12.dp),
+                )
+            } else {
+                live.forEach { job ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onPick(job) }
+                            .padding(vertical = 10.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(accent.copy(alpha = 0.16f), CircleShape)
+                                .border(0.75.dp, accent.copy(alpha = 0.35f), CircleShape),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.Outlined.Groups,
+                                contentDescription = null,
+                                tint = accent,
+                                modifier = Modifier.size(22.dp),
+                            )
+                        }
+                        Column(
+                            modifier = Modifier
+                                .weight(1f, fill = false)
+                                .padding(start = 12.dp),
+                        ) {
+                            Text(
+                                listRowTitle(job),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                listRowStatus(job),
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        SubAgentPillModel.elapsed(job, now)?.let {
+                            Text(
+                                it,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                style = TabularDigits,
+                                color = accent,
+                                modifier = Modifier.padding(start = 8.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** "测试子代理：沙箱环…" - the original sheet row's first line. */
+private fun listRowTitle(job: AgentJob): String {
+    val agent = job.agentName?.takeIf { it.isNotBlank() }
+    return if (agent != null) "$agent：${job.title}" else job.title
+}
+
+/** "运行中 · 第 2 轮 · shell_exec…" - the original sheet row's second line. */
+@Composable
+private fun listRowStatus(job: AgentJob): String {
+    val parts = mutableListOf(
+        stringResource(
+            if (job.state == AgentJobState.RUNNING) R.string.helper_status_running
+            else R.string.agent_status_queued,
+        ),
+    )
+    job.roundCount?.takeIf { it > 0 }?.let { parts += stringResource(R.string.agent_callback_turn, it) }
+    job.summaryLine?.takeIf { it.isNotBlank() }?.let { parts += it }
+    return parts.joinToString(" · ")
 }
 
 /** Stop the run: a started child goes through the shared user-stop helper
@@ -304,15 +429,26 @@ private fun SubAgentPillCard(
                     .padding(start = 4.dp, top = 4.dp, bottom = 4.dp, end = 13.dp),
             ) {
                 SubAgentPillRing(running = running, accent = accent)
-                if (state.others > 0) {
-                    Text(
-                        stringResource(R.string.subagent_pill_a11y_more, state.others),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = accent,
-                        modifier = Modifier.padding(start = 6.dp),
-                        maxLines = 1,
-                    )
+                // [T-subagent-list-sheet] The original (pre-vd) pill shows a
+                // round COUNT badge with the total live sub agents instead
+                // of a "+N" chip - one pill, badge says how many.
+                val total = state.others + 1
+                if (total > 1) {
+                    Box(
+                        modifier = Modifier
+                            .padding(start = 6.dp)
+                            .size(18.dp)
+                            .background(accent, CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "$total",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.surface,
+                            maxLines = 1,
+                        )
+                    }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 8.dp)) {
                     val isWaiting = clock == waitingLabel

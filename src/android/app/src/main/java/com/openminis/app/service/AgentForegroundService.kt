@@ -1624,13 +1624,15 @@ class AgentForegroundService : Service() {
                 // Description (those are androidx additions) - the title and
                 // subtitle come from the builder's content title/text and the
                 // session's metadata artwork.
-                // [T-island-no-seekbar] MediaStyle WITHOUT a session token:
-                // no transport state means MIUI draws no seek bar and no
-                // play/pause glyph; title/subtitle come from the content
-                // title/text above. (1.31 added the session to kill the
-                // empty "暂无播放" tile - content now comes from the
-                // content fields, so a session is not needed.)
+                // [T-island-session-back] 1.38's session-less test proved
+                // MIUI shows the plain white card and DROPS the island
+                // entirely: the black media island and its transport row
+                // (the 00:00 seek bar) come as a package with the session.
+                // Session restored: island + black card back, seek bar
+                // included; the small line still carries the task status
+                // via the metadata artist.
                 Notification.MediaStyle()
+                    .setMediaSession(islandMediaSession(stopIntent, titleText, mediaSubtitle).sessionToken)
                     .setShowActionsInCompactView(),
             )
         largeIcon?.let { mediaBuilder.setLargeIcon(it) }

@@ -11,4 +11,7 @@
     <string name="subagent_pill_a11y_title">子代理运行中</string>
     <string name="subagent_pill_a11y_hint">打开子代理状态</string>
     <string name="subagent_pill_a11y_more">另有 %1$d 个</string>
+    <string name="subagent_pill_list_title">运行中的子代理（%1$d）</string>
+    <string name="subagent_pill_list_empty">没有运行中的子代理。</string>
+    <string name="subagent_pill_list_hint">显示所有运行中的子代理</string>
 </resources>

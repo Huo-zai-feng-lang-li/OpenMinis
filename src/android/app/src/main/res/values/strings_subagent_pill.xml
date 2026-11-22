@@ -11,4 +11,7 @@
     <string name="subagent_pill_a11y_title">Sub agent running</string>
     <string name="subagent_pill_a11y_hint">Opens the sub agent status</string>
     <string name="subagent_pill_a11y_more">+%1$d more</string>
+    <string name="subagent_pill_list_title">Running sub agents (%1$d)</string>
+    <string name="subagent_pill_list_empty">No running sub agents.</string>
+    <string name="subagent_pill_list_hint">Shows all running sub agents</string>
 </resources>
