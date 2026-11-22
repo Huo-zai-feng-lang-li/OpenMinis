@@ -607,6 +607,20 @@ internal class MinisShellDisplay(
         return tasks.filterNotNull().filter { displayField.getInt(it) == displayId }
     }
 
+    /** Active (non-closed) tasks on a display — for visibility checks. */
+    private fun activeTasksOn(displayId: Int): List<Any> {
+        val methods = taskManager.javaClass.methods.filter { it.name == "getTasks" }
+        val withDisplay = methods.firstOrNull { it.parameterTypes.size == 4 }
+        val tasks = if (withDisplay != null) {
+            withDisplay.invoke(taskManager, MAX_TASKS, false, true, displayId)
+        } else {
+            methods.first { it.parameterTypes.size == 3 }
+                .invoke(taskManager, MAX_TASKS, false, true)
+        } as List<*>
+        val displayField = TASK_INFO.getField("displayId")
+        return tasks.filterNotNull().filter { displayField.getInt(it) == displayId }
+    }
+
     /** Tasks on every display (Mika ShellService:709–719). */
     private fun allTasks(): List<Any> {
         val methods = taskManager.javaClass.methods.filter { it.name == "getTasks" }
@@ -713,18 +727,20 @@ internal class MinisShellDisplay(
         val anyUser = userId == myUser
         val visibleField = runCatching { TASK_INFO.getField("isVisible") }.getOrNull()
         val userField = runCatching { TASK_INFO.getField("userId") }.getOrNull()
-        val main = runCatching { tasksOn(Display.DEFAULT_DISPLAY) }
-        if (main.isFailure) {
+        // Use hideClosedTasks=true so stopped/killed tasks don't trigger false positives
+        val activeMain = runCatching { activeTasksOn(Display.DEFAULT_DISPLAY) }
+        if (activeMain.isFailure) {
             Log.w(TAG, "cannot read main-screen tasks; treating $packageName as in use")
             return true
         }
-        return (main.getOrNull() ?: emptyList()).withIndex().any { (index, t) ->
+        return (activeMain.getOrNull() ?: emptyList()).any { t ->
             val pkg = packageName in packagesOf(t)
             val userOk = if (anyUser) true else {
                 val tUser = userField?.let { runCatching { it.getInt(t) }.getOrNull() }
                 tUser == null || tUser == userId
             }
-            pkg && userOk && (visibleField?.getBoolean(t) ?: (index == 0))
+            // Active tasks (hideClosedTasks=true) are by definition visible
+            pkg && userOk
         }
     }
 
