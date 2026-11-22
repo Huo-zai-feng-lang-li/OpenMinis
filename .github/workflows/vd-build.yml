@@ -87,18 +87,18 @@ jobs:
           ls -la dist/
 
 
-      - name: Publish release (in-app update protocol, tag 1.27)
+      - name: Publish release (in-app update protocol, tag 1.28)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           apk=$(find dist -name '*.apk' | head -1)
-          out="MinisApp-1.27-build58-arm64-v8a.apk"
+          out="MinisApp-1.28-build59-arm64-v8a.apk"
           cp "$apk" "$out"
-          if gh release view 1.27 >/dev/null 2>&1; then
-            gh release upload 1.27 "$out" --clobber
+          if gh release view 1.28 >/dev/null 2>&1; then
+            gh release upload 1.28 "$out" --clobber
           else
-            gh release create 1.27 \
-              --title "Minis 1.27 (build 58, SubAgentPill + session-bound capsule + repin fix)" \
+            gh release create 1.28 \
+              --title "Minis 1.28 (build 59, SubAgentPill + session-bound capsule + repin fix)" \
               --notes "New: SubAgentPill pinned at chat top (model info + timer + pause), virtual display capsule session-bound, moveTask am fallback (repin works in shell mode), visibleOnMainScreen fixed, 8 reflection type fixes, P2 batch (text errEnvelope, a11y recycle, cold-restart guard, taskId refresh). Perf build; in-place update over 1.26." "$out"
           fi
 
