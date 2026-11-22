@@ -851,37 +851,32 @@ fun ChatScreen(
         com.openminis.app.diagnostics.HangDetector.markHealthyTick()
     }
 
-    // [vd-session-binding] "同屏全局只活 1 块": displays are bound to chat
-    // sessions. When THIS session becomes active, free every display owned by
-    // another session — the capsule overlay (MinisCapsule) is bound to the
-    // display change listener, so its window vanishes automatically; no
-    // capsule-side change needed. This stops a new session from piling a
-    // display on top of an old session's still-live one.
+    // [vd-session-binding] v2 — capsule-session binding: displays are bound
+    // to chat sessions but SURVIVE session switches (the owning agent keeps
+    // working in the background). Instead of releasing the other sessions'
+    // displays on switch-in (the old "同屏全局只活 1 块" rule, which made the
+    // capsule disappear AND destroyed the previous session's screen), we now
+    // tell the manager which session is ACTIVE: MinisAgentDisplayManager
+    // .setCurrentSession(sessionId). The capsule overlay (MinisCapsule)
+    // shows only the active session's display — switching away closes its
+    // window, switching back re-mounts it, and backgrounding the app keeps
+    // it visible (a11y overlay). setCurrentSession posts a capsule refresh
+    // via the manager's change listener, so the window reacts immediately.
     //
     // LaunchedEffect(sessionId) re-runs only when the session changes (or on
-    // first composition of this instance); [lastVdReleaseSession] dedupes
+    // first composition of this instance); [lastVdActiveSession] dedupes
     // re-runs within the same composable instance (e.g. config-change
-    // recomposition) so first launch / recomposition does not re-release.
+    // recomposition) so recomposition does not re-post redundant refreshes.
     // Re-entering a session later (new instance, after another session ran)
-    // does re-release — that is the intended "one live display per screen"
+    // re-binds it — that is the intended "capsule follows the session"
     // behavior.
-    // runCatching: a release failure must log, never crash the chat UI.
-    val lastVdReleaseSession = remember { mutableStateOf<String?>(null) }
+    val lastVdActiveSession = remember { mutableStateOf<String?>(null) }
     androidx.compose.runtime.LaunchedEffect(sessionId) {
-        if (lastVdReleaseSession.value == sessionId) return@LaunchedEffect
-        lastVdReleaseSession.value = sessionId
-        // withContext is suspend, so it runs in the LaunchedEffect coroutine;
-        // the release itself is wrapped in runCatching — a failure only logs,
-        // it never crashes the chat UI.
-        kotlinx.coroutines.withContext(Dispatchers.IO) {
-            runCatching {
-                com.openminis.app.display.MinisAgentDisplayManager.releaseOtherSessions(sessionId)
-            }.onFailure {
-                com.openminis.app.logging.AppLogger.warning(
-                    "ChatScreen", "vd session-release $sessionId failed: ${it.message}",
-                )
-            }
-        }
+        if (lastVdActiveSession.value == sessionId) return@LaunchedEffect
+        lastVdActiveSession.value = sessionId
+        // setCurrentSession is main-thread safe (it posts the capsule
+        // refresh via Handler); no IO hop needed and nothing can throw.
+        com.openminis.app.display.MinisAgentDisplayManager.setCurrentSession(sessionId)
     }
 
     // Drain any pending Move-to transfer when entering this session — the

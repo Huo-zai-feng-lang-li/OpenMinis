@@ -817,6 +817,42 @@ object MinisAgentDisplayManager {
     fun list(): List<AgentDisplayApi> = synchronized(lock) { active.values.toList() }
 
     /**
+     * The chat session currently on screen — the ONLY session whose virtual
+     * display the capsule overlay (MinisCapsule) may show. Displays are
+     * per-session and SURVIVE session switches (the owning agent keeps
+     * working in the background), so "which display does the capsule point
+     * at" is decided by the ACTIVE session, not by "the newest display".
+     * Kept in the manager (not in the capsule) so any consumer — capsule,
+     * island, tooling — resolves the same binding.
+     */
+    @Volatile
+    private var currentSession: String = ""
+
+    /**
+     * Set the active chat session (called by ChatScreen's
+     * LaunchedEffect(sessionId) on every session switch / first composition)
+     * and kick a capsule refresh ([notifyChanged]), so the capsule mounts
+     * when the new session owns a display and closes when it owns none.
+     * Backgrounding the app changes nothing: currentSession stays put and
+     * the a11y overlay keeps showing that session's display.
+     */
+    fun setCurrentSession(sessionId: String) {
+        currentSession = sessionId
+        notifyChanged()
+    }
+
+    /**
+     * The displayId owned by the current session, or null when the session
+     * owns no live display. MinisCapsule.refresh() shows exactly this
+     * display; unowned displays ("" owner — created from Settings or by a
+     * caller that did not pass an ownerSession) match only the pre-chat
+     * empty-session state and are never re-shown by a named session.
+     */
+    fun currentSessionDisplayId(): Int? = synchronized(lock) {
+        active.keys.firstOrNull { ownerSessions[it] == currentSession }
+    }
+
+    /**
      * Main-thread notifications after a display was created or released —
      * the capsule overlay (com.openminis.app.capsule.MinisCapsule) uses this
      * to mount/unmount itself lazily. Kept on the manager rather than in the
@@ -874,6 +910,12 @@ object MinisAgentDisplayManager {
      * "同屏全局只活 1 块" — when the [owner] chat session becomes active
      * (session switch), free every display that belongs to a DIFFERENT
      * session, keeping only [owner]'s.
+     *
+     * NOTE (vd-session-binding v2): ChatScreen no longer calls this on
+     * switch-in — displays now SURVIVE session switches and the capsule is
+     * bound to the active session instead ([setCurrentSession] /
+     * [currentSessionDisplayId]). Kept for session-teardown-style callers
+     * that still want hard release semantics.
      *
      * Why: displays follow their chat session. The capsule overlay
      * (MinisCapsule) is bound to the display change listener, so once another

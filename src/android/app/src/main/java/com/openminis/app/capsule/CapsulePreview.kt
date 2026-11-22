@@ -92,7 +92,14 @@ fun sameFrame(a: Bitmap, b: Bitmap): Boolean =
  *
  * Lazy + frame-gated (Mika lesson #117): the capsule only exists while a
  * virtual display does — display created → window opened; display released
- * or the a11y service destroyed → windows removed. OEM ROMs that kill the
+ * or the a11y service destroyed → windows removed.
+ *
+ * Session-bound ([vd-session-binding]): the window tracks the display owned
+ * by the ACTIVE chat session only (MinisAgentDisplayManager.
+ * currentSessionDisplayId), not merely "some display is alive" — other
+ * sessions' displays keep living in the background with their capsule
+ * closed; switching sessions mounts/unmounts the window without destroying
+ * any display. OEM ROMs that kill the
  * a11y service (MIUI re-bind) degrade to "no capsule" until
  * [onServiceConnected] re-mounts it; when the overlay is refused entirely
  * the fallback is the in-app preview (docs/virtual-display-preview.md).
@@ -167,9 +174,20 @@ object MinisCapsule {
             host = VdOverlayHost(service)
             hostService = service
         }
-        val displays = MinisAgentDisplayManager.list()
-        AppLogger.info(TAG, "refresh: ${displays.size} display(s) [${displays.map { it.displayId }}], mounting = ${displays.isNotEmpty()}")
-        val target = displays.lastOrNull()
+        // [vd-session-binding] Capsule-session binding: show ONLY the display
+        // owned by the ACTIVE chat session (set via
+        // MinisAgentDisplayManager.setCurrentSession from ChatScreen). Other
+        // sessions' displays keep living in the background but their
+        // capsule stays closed; switching back to a session that still owns
+        // a display re-mounts it. No display is destroyed on switch — the
+        // switch only moves the binding.
+        val targetId = MinisAgentDisplayManager.currentSessionDisplayId()
+        AppLogger.info(TAG, "refresh: active displays = ${MinisAgentDisplayManager.list().map { it.displayId }}, current-session display = $targetId, mounting = ${targetId != null}")
+        if (targetId == null) {
+            closeWindows()
+            return
+        }
+        val target = MinisAgentDisplayManager.get(targetId)
         if (target == null) {
             closeWindows()
             return
