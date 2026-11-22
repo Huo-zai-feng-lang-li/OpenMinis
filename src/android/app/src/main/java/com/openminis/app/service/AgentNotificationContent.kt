@@ -27,15 +27,8 @@ import com.openminis.app.ui.chat.toolIconResFor
  *                 its own icon and text, the clock counting down to the
  *                 question's timeout, so a backgrounded user sees it needs them
  *                 instead of a "Running" that never ends
- *  - [VD]         [T-vd-island-resident] no agent task, but an agent virtual
- *                 display is live: the service is kept resident so the
- *                 status-bar island (MIUI 超灵动岛) keeps showing. Never the
- *                 output of [resolveAgentPhase] (that function is a pure
- *                 tracker-state model); [AgentForegroundService] synthesises
- *                 it when the display registry is non-empty and the phase
- *                 would otherwise be [IDLE].
  */
-internal enum class AgentPhase { COMPLETED, TOOL, THINKING, GENERATING, IDLE, WAITING, ASKING, VD }
+internal enum class AgentPhase { COMPLETED, TOOL, THINKING, GENERATING, IDLE, WAITING, ASKING }
 
 internal fun resolveAgentPhase(
     isCompleted: Boolean,
@@ -77,9 +70,6 @@ internal fun notificationSmallIconFor(phase: AgentPhase, toolName: String?, wait
     AgentPhase.TOOL -> toolIconResFor(toolName)
     AgentPhase.THINKING -> R.drawable.ic_tool_psychology
     AgentPhase.ASKING -> R.drawable.ic_notification_question
-    // [T-vd-island-resident] Resident island: the same brand monochrome the
-    // IDLE branch uses (there is no tool to glyph, no clock to count).
-    AgentPhase.VD -> R.drawable.ic_launcher_monochrome
     AgentPhase.GENERATING, AgentPhase.IDLE -> R.drawable.ic_launcher_monochrome
 }
 

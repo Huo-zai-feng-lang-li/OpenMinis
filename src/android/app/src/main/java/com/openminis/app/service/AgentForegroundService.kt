@@ -18,10 +18,8 @@ import androidx.core.app.NotificationCompat
 import com.openminis.app.MinisApp
 import com.openminis.app.agent.SoulMetadata
 import com.openminis.app.agent.SoulStore
-import com.openminis.app.R
 import com.openminis.app.display.MinisAgentDisplayManager
-import com.openminis.app.display.MinisShellAgentDisplay
-import com.openminis.app.shizuku.MinisShellClient
+import com.openminis.app.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -102,6 +100,13 @@ class AgentForegroundService : Service() {
         internal fun startHasNothingToRun(action: String?, shouldRun: Boolean): Boolean =
             action != ACTION_STOP && !shouldRun
 
+        /**
+         * [T-vd-island-resident] True while any agent virtual display is
+         * live. Such a display keeps this service resident even when the
+         * agent tracker has nothing to run.
+         */
+        fun vdDisplayResident(): Boolean = MinisAgentDisplayManager.list().isNotEmpty()
+
         // [T-bg-overlay phase 2 fix] Separate channel + notification id
         // for the SYSTEM_ALERT_WINDOW permission nudge so it can have a
         // higher importance than the ongoing FGS status row (which is
@@ -129,31 +134,6 @@ class AgentForegroundService : Service() {
         // framework reads ("android.requestPromotedOngoing").
         private const val EXTRA_REQUEST_PROMOTED_ONGOING = "android.requestPromotedOngoing"
         private const val ACTION_STOP = "com.openminis.app.STOP_AGENT_SERVICE"
-
-        /**
-         * [T-vd-island-resident] True while any agent virtual display is
-         * live (in-process `MinisAgentDisplay` or Shizuku shell-host
-         * `MinisShellAgentDisplay`). Such a display keeps this service
-         * resident — and its ongoing notification on the status bar /
-         * MIUI 超灵动岛 — even when the agent tracker has nothing to run.
-         */
-        fun vdDisplayResident(): Boolean = MinisAgentDisplayManager.list().isNotEmpty()
-
-        /**
-         * [T-vd-island-resident] App-upgrade backstop, called once from
-         * [MinisApp.onCreate]: after an in-place upgrade the new process
-         * must never mix the PREVIOUS build's 9001/9002 notifications with
-         * the new ones (a stale style hanging under the new island layout).
-         * Cancelling here is safe: a sticky-foreground revival re-posts its
-         * own notification from [onStartCommand] within the 5 s FG window,
-         * and the nudge (9002) is a heads-up the observer re-posts when
-         * still needed.
-         */
-        fun cancelLegacyNotifications(context: Context) {
-            val nm = context.getSystemService(NotificationManager::class.java) ?: return
-            nm.cancel(NOTIFICATION_ID)
-            nm.cancel(OVERLAY_NUDGE_NOTIFICATION_ID)
-        }
 
         /**
          * Starts or updates the foreground service with current status.
@@ -369,15 +349,7 @@ class AgentForegroundService : Service() {
         // "0 sessions | Idle" notification and returned START_STICKY again -
         // an ongoing notification and status-bar chip that nothing would ever
         // stop, reported as "the Agent is running" with no chat open.
-        // [T-vd-island-resident] ...except when a virtual display is live:
-        // the island has to stay resident, so fall through to the ordinary
-        // start below — its buildNotification() re-skins the row as the
-        // display's island and START_STICKY keeps it alive. (A sticky revival
-        // of a process that died with an in-process display finds the
-        // registry empty and takes the original stop path instead.)
-        if (startHasNothingToRun(intent?.action, SessionActivityTracker.shouldRunServiceNow()) &&
-            !vdDisplayResident()
-        ) {
+        if (startHasNothingToRun(intent?.action, SessionActivityTracker.shouldRunServiceNow())) {
             Log.d(TAG, "start with nothing to run — satisfying the FG contract, then stopping")
             try {
                 val stub = buildNotification(0, "Idle")
@@ -478,10 +450,7 @@ class AgentForegroundService : Service() {
         // scheduled task is still processing: swiping the app away keeps the
         // service, as a running loop does.
         if (SessionActivityTracker.activeSessions.value.isEmpty() &&
-            SessionActivityTracker.scheduledSessions.value.isEmpty() &&
-            // [T-vd-island-resident] a live virtual display keeps the island;
-            // swiping the app away must not take it with it.
-            !vdDisplayResident()
+            SessionActivityTracker.scheduledSessions.value.isEmpty()
         ) {
             Log.d(TAG, "onTaskRemoved with no active or scheduled sessions, stopping self")
             stopSelf()
@@ -520,7 +489,6 @@ class AgentForegroundService : Service() {
 
     override fun onDestroy() {
         isAlive = false
-        stopVdDisplayObserver()
         releaseWakeLock()
         try {
             overlayController?.hide()
@@ -564,74 +532,6 @@ class AgentForegroundService : Service() {
 
     /** [T-android-user-ask-chip] The question the notification shows while ASKING. */
     private fun askingNow() = askingStateFor(com.openminis.app.agent.userask.UserAskCenter.asks.value.values)
-
-    /**
-     * [T-vd-island-resident] Virtual-display resident island.
-     *
-     * The tracker starts/stops the service on AGENT tasks only, so a session
-     * where the user is merely viewing a background app on a virtual display
-     * (no agent task running) leaves no notification behind — and the MIUI
-     * 超灵动岛 goes blank. This observer is registered for the service's
-     * lifetime and reacts to the display registry's changes on the main
-     * thread ([MinisAgentDisplayManager.notifyChanged] posts there):
-     *
-     *  - a display exists and NO agent task runs: re-post the ongoing
-     *    notification. [buildNotification] sees `vdDisplayResident()` and
-     *    re-skins it as the resident island row (title = soul name,
-     *    subtitle = "虚拟屏运行中 · pkg").
-     *  - the last display is released and no agent task runs: the ordinary
-     *    idle self-stop. The tracker's stop path is vd-aware (it refuses to
-     *    kill the service while a display is live), so this listener is what
-     *    actually releases the service once the display count hits zero.
-     *  - an agent task runs: the task-state notification owns itself through
-     *    the tracker's existing start/update path — this listener only
-     *    re-posts, never starts or overrides.
-     *
-     * The service's OWN start is handled app-wide by the listener
-     * [MinisApp] registers (a display appearing must start the service even
-     * when it is not alive yet).
-     */
-    private var vdChangeListener: (() -> Unit)? = null
-
-    private fun startVdDisplayObserver() {
-        val listener: () -> Unit = { handleVdDisplaysChanged() }
-        vdChangeListener = listener
-        MinisAgentDisplayManager.addChangeListener(listener)
-    }
-
-    private fun stopVdDisplayObserver() {
-        vdChangeListener?.let { MinisAgentDisplayManager.removeChangeListener(it) }
-        vdChangeListener = null
-    }
-
-    private fun handleVdDisplaysChanged() {
-        if (MinisAgentDisplayManager.list().isEmpty()) {
-            // Last display is gone: keep the service only while the agent
-            // tracker still needs it; otherwise the existing idle self-stop.
-            if (!SessionActivityTracker.shouldRunServiceNow()) {
-                Log.d(TAG, "last virtual display released and no agent task — idle self-stop")
-                stopSelf()
-            }
-            return
-        }
-        // A display is (still) live: keep the island resident.
-        refreshOngoingNotification()
-        ensureChipTicker()
-    }
-
-    /**
-     * [T-vd-island-resident] The package to put in the resident island's
-     * subtitle: what was most recently launched on the NEWEST display. Only
-     * the Shizuku shell host records launches ([MinisShellClient.launchedApp]
-     * → `MinisShellDisplay.lastLaunched`); an in-process display or an
-     * unbound / pre-method helper yields null and the subtitle falls back
-     * to the bare "虚拟屏运行中".
-     */
-    private fun vdRunningPackage(): String? {
-        val display = MinisAgentDisplayManager.list().lastOrNull() ?: return null
-        if (display !is MinisShellAgentDisplay) return null
-        return MinisShellClient.launchedApp(display.displayId)
-    }
 
     private fun startOverlayObserver() {
         val app = applicationContext as? MinisApp ?: return
@@ -1241,7 +1141,7 @@ class AgentForegroundService : Service() {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 getString(R.string.bg_service_channel_name),
-                NotificationManager.IMPORTANCE_HIGH,
+                NotificationManager.IMPORTANCE_LOW,
             ).apply {
                 description = getString(R.string.bg_service_channel_description)
                 setShowBadge(false)
@@ -1431,38 +1331,22 @@ class AgentForegroundService : Service() {
             isScheduledWaiting = scheduledWait != null,
             isAwaitingAnswer = asking != null,
         )
-        // [T-vd-island-resident] No agent task, but an agent virtual display
-        // is live: re-skin the ongoing notification as the display's
-        // resident island (title = soul name, subtitle = "虚拟屏运行中 ·
-        // pkg"). Synthesised HERE rather than inside resolveAgentPhase
-        // (a pure tracker-state model): every agent-task phase keeps its
-        // exact existing content, and a display simply coexists with it.
-        val vdResident = phase == AgentPhase.IDLE && vdDisplayResident()
-        val displayPhase = if (vdResident) AgentPhase.VD else phase
         // [T-fgs-presence-no-chip] Merely present in a chat: a plain row, see
         // isPresenceOnly. Re-evaluated on every rebuild, so the start command a
         // run's setActive dispatches re-posts it promoted, and the one the
         // tracker dispatches when the last reason other than presence goes
-        // away re-posts it demoted. The resident island is likewise never
-        // promoted to a chip: there is no task clock to tick.
-        val presenceOnly = if (vdResident) true else isPresenceOnly(
+        // away re-posts it demoted.
+        val presenceOnly = isPresenceOnly(
             phase,
             hasScheduledHold = SessionActivityTracker.scheduledSessions.value.isNotEmpty(),
         )
-        val smallIcon = notificationSmallIconFor(displayPhase, toolName, waitHasClock = scheduledWait?.nextRunMs != null)
+        val smallIcon = notificationSmallIconFor(phase, toolName, waitHasClock = scheduledWait?.nextRunMs != null)
         val soulName = SoulStore.cachedMetadata.value.name.ifBlank { SoulMetadata.DEFAULT.name }
-        val titleText = when (displayPhase) {
+        val titleText = when (phase) {
             AgentPhase.COMPLETED -> getString(R.string.bg_service_notification_title_completed)
-            // [T-island-clean-title] The island title is the short soul/app
-            // name (like Pinduoduo/Didi: title = who, detail = subtitle). The
-            // technical tool task title used to be shown here and made the
-            // promoted chip read like a log line.
-            AgentPhase.TOOL -> soulName
+            AgentPhase.TOOL -> toolRowTitle(toolName!!, toolTitle)
             AgentPhase.THINKING, AgentPhase.GENERATING -> soulName
             AgentPhase.IDLE -> getString(R.string.bg_service_notification_title)
-            // [T-vd-island-resident] The island shows WHO owns it (the soul),
-            // not a generic "agent active" — the subtitle says the display.
-            AgentPhase.VD -> soulName
             // iOS's waiting card is titled with the conversation.
             AgentPhase.WAITING -> scheduledWait?.chatTitle
                 ?: scheduledWait?.label?.takeIf { it.isNotBlank() }
@@ -1475,7 +1359,7 @@ class AgentForegroundService : Service() {
         val firingCounter = SessionActivityTracker.scheduledFiring.value
             ?.takeIf { it.sessionId in SessionActivityTracker.activeSessions.value }
             ?.runCounter
-        val collapsedText = when (displayPhase) {
+        val collapsedText = when (phase) {
             // Completed is a RESTING state: the chronometer is off, so the
             // total run time has to stay in the text or it would vanish.
             // [T-port-sched-completed-copy] No "0 sessions" when nothing is left.
@@ -1515,19 +1399,9 @@ class AgentForegroundService : Service() {
                 sessionLabel,
                 getString(R.string.user_ask_waiting),
             )
-            // [T-vd-island-resident] "虚拟屏运行中 · pkg" (or the bare label
-            // when the host cannot report what launched on the display).
-            AgentPhase.VD -> {
-                val pkg = vdRunningPackage()
-                if (pkg != null) {
-                    getString(R.string.vd_island_running_with_pkg, pkg)
-                } else {
-                    getString(R.string.vd_island_running)
-                }
-            }
         }
         val clock = notificationClockFor(
-            phase = displayPhase,
+            phase = phase,
             runStartWallMs = runStartWallMs,
             finishedWallMs = finishedWallMs,
             nextRunWallMs = scheduledWait?.nextRunMs,
@@ -1617,74 +1491,9 @@ class AgentForegroundService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
 
-        // [T-android-island-visual] Dark "island" card on top of the default
-        // layout: the same phase text re-rendered inside a rounded dark card
-        // (custom RemoteViews) with a left icon tile, a brand-blue thin
-        // indeterminate progress bar and the Stop control as a capsule.
-        // Visual layer only — no source-of-truth changes.
-        //
-        // Built crash-safe: on ANY ROM that cannot inflate/bind this layout we
-        // fall back to the default notification layout (the Builder still
-        // carries title/text/progress/actions), so a custom-view problem can
-        // never take the foreground service down with it. ROMs that ignore
-        // custom views (e.g. MIUI's 超灵动岛 chrome, which draws the
-        // notification's own shell) use the default row, tinted by setColor.
-        // NOTE: the old `setInt(progress, "setIndeterminate", 1)` was removed —
-        // the layout's `android:indeterminate="true"` already makes the bar
-        // indeterminate, and that call threw ActionException on API 36
-        // (no `ProgressBar.setIndeterminate(int)`), which crash-looped the app
-        // as a BadForegroundServiceNotificationException.
-        runCatching {
-            val islandViews = android.widget.RemoteViews(packageName, R.layout.notification_agent_island)
-            islandViews.setImageViewResource(R.id.notification_island_icon, smallIcon)
-            islandViews.setTextViewText(R.id.notification_island_title, titleText)
-            islandViews.setTextViewText(R.id.notification_island_subtitle, collapsedText)
-            if (isToolRunning) {
-                islandViews.setInt(R.id.notification_island_progress, "setVisibility", android.view.View.VISIBLE)
-            } else {
-                islandViews.setInt(R.id.notification_island_progress, "setVisibility", android.view.View.GONE)
-            }
-            // [T-vd-island-resident] Nothing to stop on a resident island:
-            // there is no agent task, so the capsule's Stop control is
-            // meaningless (mirrors the COMPLETED rule below).
-            if (isCompleted || vdResident) {
-                islandViews.setInt(R.id.notification_island_stop, "setVisibility", android.view.View.GONE)
-            } else {
-                islandViews.setInt(R.id.notification_island_stop, "setVisibility", android.view.View.VISIBLE)
-                // The click-binding method was renamed between platform
-                // surfaces (setPendingIntent -> setOnClickPendingIntent on the
-                // API 36 compile SDK); resolve both so the capsule click binds
-                // on old and new ROMs. If neither resolves, the default-layout
-                // Stop action below is the fallback.
-                runCatching {
-                    islandViews.javaClass.getMethod(
-                        "setOnClickPendingIntent",
-                        Int::class.javaPrimitiveType,
-                        android.app.PendingIntent::class.java,
-                    ).invoke(islandViews, R.id.notification_island_stop, stopPendingIntent)
-                }.getOrElse {
-                    runCatching {
-                        islandViews.javaClass.getMethod(
-                            "setPendingIntent",
-                            Int::class.javaPrimitiveType,
-                            android.app.PendingIntent::class.java,
-                        ).invoke(islandViews, R.id.notification_island_stop, stopPendingIntent)
-                    }
-                }
-            }
-            builder.setCustomContentView(islandViews)
-            builder.setCustomBigContentView(islandViews)
-        }.onFailure {
-            com.openminis.app.logging.AppLogger.warning(TAG, "island custom view unavailable, using default layout: ${it.message}")
-        }
-        // Brand blue (#78C8FF, the overlay ring's accent) tints the small
-        // icon and the default-layout progress bar.
-        builder.setColor(0xE678C8FF.toInt())
-
         // [T-android-live-update-completed] Same rule as the promoted branch:
-        // no Stop once there is nothing left to stop. [T-vd-island-resident]
-        // Likewise on the resident island: no agent task, so nothing to stop.
-        if (!isCompleted && !vdResident) {
+        // no Stop once there is nothing left to stop.
+        if (!isCompleted) {
             builder.addAction(
                 android.R.drawable.ic_menu_close_clear_cancel,
                 getString(R.string.bg_service_stop_action),
@@ -1803,21 +1612,6 @@ class AgentForegroundService : Service() {
         builder.addExtras(android.os.Bundle().apply {
             putBoolean(EXTRA_REQUEST_PROMOTED_ONGOING, true)
         })
-
-        // [T-vd-island-resident] Belt-and-braces for the MIUI 超灵动岛: also
-        // request promotion through the builder-level API 35+ method
-        // `setRequestPromotedOngoing(true)` when the ROM exposes it. The
-        // framework's `hasPromotableCharacteristics()` gates on the extras
-        // key set above (and the API 36 stubs do not export the method,
-        // @FlaggedApi), but OEM skins are known to read the builder-level
-        // flag too — when the reflection finds it, both sources agree.
-        // When it doesn't, the extras path above stands alone and the
-        // runCatching swallows it, so no new failure mode is introduced.
-        runCatching {
-            builder.javaClass
-                .getMethod("setRequestPromotedOngoing", Boolean::class.javaPrimitiveType)
-                .invoke(builder, true)
-        }
 
         val notification = builder.build()
         if (!notification.hasPromotableCharacteristics()) {
