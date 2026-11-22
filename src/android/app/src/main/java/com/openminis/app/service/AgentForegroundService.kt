@@ -102,8 +102,8 @@ class AgentForegroundService : Service() {
 
         /**
          * [T-vd-island-resident] True while any agent virtual display is
-         * live. Such a display keeps this service resident even when the
-         * agent tracker has nothing to run.
+         * live (in-process `MinisAgentDisplay`). Such a display keeps this
+         * service resident even when the agent tracker has nothing to run.
          */
         fun vdDisplayResident(): Boolean = MinisAgentDisplayManager.list().isNotEmpty()
 
@@ -349,7 +349,7 @@ class AgentForegroundService : Service() {
         // "0 sessions | Idle" notification and returned START_STICKY again -
         // an ongoing notification and status-bar chip that nothing would ever
         // stop, reported as "the Agent is running" with no chat open.
-        if (startHasNothingToRun(intent?.action, SessionActivityTracker.shouldRunServiceNow())) {
+        if (startHasNothingToRun(intent?.action, SessionActivityTracker.shouldRunServiceNow()) && !vdDisplayResident()) {
             Log.d(TAG, "start with nothing to run — satisfying the FG contract, then stopping")
             try {
                 val stub = buildNotification(0, "Idle")
@@ -450,7 +450,8 @@ class AgentForegroundService : Service() {
         // scheduled task is still processing: swiping the app away keeps the
         // service, as a running loop does.
         if (SessionActivityTracker.activeSessions.value.isEmpty() &&
-            SessionActivityTracker.scheduledSessions.value.isEmpty()
+            SessionActivityTracker.scheduledSessions.value.isEmpty() &&
+            !vdDisplayResident()
         ) {
             Log.d(TAG, "onTaskRemoved with no active or scheduled sessions, stopping self")
             stopSelf()
