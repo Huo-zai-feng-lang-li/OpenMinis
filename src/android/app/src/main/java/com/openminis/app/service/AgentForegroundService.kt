@@ -127,6 +127,10 @@ class AgentForegroundService : Service() {
         private const val EXTRA_TOOL_STATUS = "tool_status"
         // [T-android-live-update-chip] Chip timer refresh period.
         private const val CHIP_TICK_MS = 1_000L
+        // [T-island-coarse-timer] Running-phase chip refresh: the timer text
+        // re-posts on this coarse cadence (1 s re-composed the island card
+        // on every tick - the reported expand stutter).
+        private const val CHIP_COARSE_TICK_MS = 5_000L
 
         // [T-android-dynamic-island] Framework extras key read by
         // Notification.isRequestPromotedOngoing() (Android 16). Not exported as
@@ -1040,17 +1044,11 @@ class AgentForegroundService : Service() {
                     // deadline ticks its per-second countdown.
                     val asking = askingNow()
                     if (asking != null && asking.expiresAtMs == null) return@launch
-                    // [T-island-jitter] RUNNING carries no re-post duty: the
-                    // chip's timer is a system Chronometer (setUsesChronometer
-                    // on the promoted builder) that SystemUI ticks locally,
-                    // and shortCritical is null while running, so there is
-                    // nothing for a per-second notify() to change. The old
-                    // 1 s re-post made SystemUI re-compose the island card
-                    // mid-expand — the reported stutter. Content changes
-                    // (tool / phase / done) re-post through their own
-                    // dispatches, not this loop.
-                    if (asking == null) break
-                    CHIP_TICK_MS
+                    // [T-island-coarse-timer] RUNNING re-posts on the coarse
+                    // 5 s cadence so the chip's timer text stays visibly
+                    // live without the per-second island re-compose; the
+                    // deadline-ASKING countdown keeps its 1 s tick.
+                    if (asking == null) CHIP_COARSE_TICK_MS else CHIP_TICK_MS
                 }
                 delay(delayMs)
                 if (!SessionActivityTracker.shouldRunServiceNow()) break
@@ -1434,21 +1432,19 @@ class AgentForegroundService : Service() {
         // shows the minutes left (re-posted once a minute by
         // ensureChipTicker); ASKING the time left to answer; COMPLETED
         // freezes at the run duration via the chronometer's when.
-        // [T-island-jitter] RUNNING shows NOTHING: while a chip text is
-        // present the system prefers it over the chronometer, which forced a
-        // once-a-second re-post to keep the timer live — and that re-post
-        // re-composed the island card mid-expand (the reported stutter).
-        // Null hands the clock to the system Chronometer, which ticks
-        // locally with zero notify() traffic. (ColorOS 16 once fell back to
-        // the full content title when the text was null; if that regresses
-        // on a tested skin, re-arm a COARSE ticker — not the 1 s one.)
+        // [T-island-coarse-timer] The chip shows the coarse elapsed timer:
+        // re-posted every 5 s while running, not per second. A null text
+        // made MIUI fall back to the full content title in the chip
+        // (stretched, uninforming - the reported "下 1.26 release A…" pill),
+        // and the 1 s re-post was the island stutter. The expanded card's
+        // header keeps ticking via the system Chronometer.
         val shortCritical = when (phase) {
             AgentPhase.WAITING -> waitChipText(scheduledWait?.nextRunMs?.let { it - nowWallMs })
                 ?: scheduledWait?.runCounter
                 ?: "…"
             // [T-android-user-ask-chip] Time left to answer.
             AgentPhase.ASKING -> askChipText(asking?.expiresAtMs?.let { it - nowWallMs })
-            else -> null
+            else -> chipTimerText(elapsedMs)
         }
 
         // [T-android-dynamic-island] Tier 3: Android 16 (Baklava) Live Updates.
@@ -1492,6 +1488,9 @@ class AgentForegroundService : Service() {
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(smallIcon)
             .setLargeIcon(islandLargeIcon())
+            // [T-island-dark-card] Same dark card on the compat path.
+            .setCustomContentView(islandCardViews(titleText, collapsedText, smallIcon))
+            .setCustomBigContentView(islandCardViews(titleText, collapsedText, smallIcon))
             .setContentTitle(titleText)
             .setContentText(collapsedText)
             .setStyle(NotificationCompat.BigTextStyle().bigText(collapsedText))
@@ -1512,15 +1511,9 @@ class AgentForegroundService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
 
-        // [T-android-live-update-completed] Same rule as the promoted branch:
-        // no Stop once there is nothing left to stop.
-        if (!isCompleted) {
-            builder.addAction(
-                android.R.drawable.ic_menu_close_clear_cancel,
-                getString(R.string.bg_service_stop_action),
-                stopPendingIntent,
-            )
-        }
+        // [T-island-dark-card] No Stop action row on the card: the user
+        // wants a minimal dark card (icon + title + subtitle); stopping
+        // happens in the app (the sub-agent pill / the chat).
 
         if (isToolRunning) {
             // Tools rarely report determinate progress (shell/browser/a11y
@@ -1605,7 +1598,7 @@ class AgentForegroundService : Service() {
                 // subtitle come from the builder's content title/text and the
                 // session's metadata artwork.
                 Notification.MediaStyle()
-                    .setMediaSession(islandMediaSession(stopIntent).sessionToken)
+                    .setMediaSession(islandMediaSession(stopIntent, titleText).sessionToken)
                     // API 36's MediaStyle kept only setShowActionsInCompactView
                     // (verified against the platform-36 stubs with javap): zero
                     // compact media buttons - the Stop control is the
@@ -1613,15 +1606,6 @@ class AgentForegroundService : Service() {
                     .setShowActionsInCompactView(),
             )
         largeIcon?.let { mediaBuilder.setLargeIcon(it) }
-        if (!isCompleted) {
-            mediaBuilder.addAction(
-                Notification.Action.Builder(
-                    Icon.createWithResource(this, android.R.drawable.ic_media_pause),
-                    getString(R.string.bg_service_stop_action),
-                    stopIntent,
-                ).build(),
-            )
-        }
         mediaBuilder.addExtras(android.os.Bundle().apply {
             putBoolean(EXTRA_REQUEST_PROMOTED_ONGOING, true)
         })
@@ -1644,6 +1628,10 @@ class AgentForegroundService : Service() {
             .setContentText(collapsedText)
             .setStyle(progressStyle)
             .apply { largeIcon?.let { setLargeIcon(it) } }
+            // [T-island-dark-card] Our own dark rounded card in the shade
+            // instead of the native white one (blue line + Stop removed).
+            .setCustomContentView(islandCardViews(titleText, collapsedText, smallIcon))
+            .setCustomBigContentView(islandCardViews(titleText, collapsedText, smallIcon))
             .setOngoing(true)
             // [T-android-notification-chronometer] Same rule as the compat
             // branch — the promoted chip is precisely where a frozen clock was
@@ -1663,19 +1651,8 @@ class AgentForegroundService : Service() {
         // the same number would contradict it.
         if (shortCritical != null) builder.setShortCriticalText(shortCritical)
 
-        // [T-android-live-update-completed] "Stop" is meaningless once the task
-        // has finished — there is nothing left to stop, and offering it invites
-        // a tap that does nothing visible. Reported from a device screenshot
-        // showing "任务已完成 ✓" above a live Stop button.
-        if (!isCompleted) {
-            builder.addAction(
-                Notification.Action.Builder(
-                    Icon.createWithResource(this, android.R.drawable.ic_menu_close_clear_cancel),
-                    getString(R.string.bg_service_stop_action),
-                    stopIntent,
-                ).build(),
-            )
-        }
+        // [T-island-dark-card] No Stop action on the card (see the compat
+        // branch): a minimal dark card; stopping happens in the app.
 
         // [T-android-dynamic-island] Request the always-visible "dynamic island"
         // promotion. The public builder method `setRequestPromotedOngoing(true)`
@@ -1718,6 +1695,22 @@ class AgentForegroundService : Service() {
      * launcher icon, centre-cropped to a square and shown where a media card
      * shows artwork. Decoded once per process.
      */
+    /**
+     * [T-island-dark-card] The dark shade card: the repo's
+     * notification_agent_island layout (rounded dark plate, icon tile,
+     * title, subtitle) via RemoteViews. The blue progress line and the
+     * Stop row stay GONE on purpose - minimal and dark, per the user.
+     */
+    private fun islandCardViews(title: String, subtitle: String, iconRes: Int): android.widget.RemoteViews {
+        val rv = android.widget.RemoteViews(applicationContext.packageName, R.layout.notification_agent_island)
+        rv.setImageViewResource(R.id.notification_island_icon, iconRes)
+        rv.setTextViewText(R.id.notification_island_title, title)
+        rv.setTextViewText(R.id.notification_island_subtitle, subtitle)
+        rv.setViewVisibility(R.id.notification_island_progress, android.view.View.GONE)
+        rv.setViewVisibility(R.id.notification_island_stop, android.view.View.GONE)
+        return rv
+    }
+
     private fun islandLargeIcon(): android.graphics.Bitmap? {
         islandLargeIconCache?.let { return it }
         val bmp = runCatching {
@@ -1737,7 +1730,7 @@ class AgentForegroundService : Service() {
      * reads its metadata for the artwork and routes the compact stop control
      * back into our stop PendingIntent.
      */
-    private fun islandMediaSession(stopIntent: PendingIntent): android.media.session.MediaSession {
+    private fun islandMediaSession(stopIntent: PendingIntent, title: String): android.media.session.MediaSession {
         val session = islandMediaSessionRef
             ?: android.media.session.MediaSession(applicationContext, "MinisAgentIsland")
                 .also { islandMediaSessionRef = it }
@@ -1746,10 +1739,16 @@ class AgentForegroundService : Service() {
                 runCatching { stopIntent.send() }
             }
         })
+        // [T-island-media-content] Claim the "playing" state so MIUI's media
+        // island shows OUR content instead of the empty "暂无播放" tile.
+        session.setPlaybackState(android.media.session.PlaybackState.Builder()
+            .setState(android.media.session.PlaybackState.STATE_PLAYING, 0f, 0f)
+            .build())
         runCatching {
             val art = islandLargeIcon()
             session.setMetadata(android.media.MediaMetadata.Builder()
                 .putString(android.media.MediaMetadata.METADATA_KEY_ARTIST, "Minis")
+                .putString(android.media.MediaMetadata.METADATA_KEY_TITLE, title)
                 .apply { art?.let { putBitmap(android.media.MediaMetadata.METADATA_KEY_ALBUM_ART, it) } }
                 .build())
         }
