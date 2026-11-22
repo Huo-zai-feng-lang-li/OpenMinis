@@ -95,6 +95,45 @@ interface IMinisShell {
     void releaseAll() = 9;
 
     /**
+     * IActivityTaskManager.moveRootTaskToDisplay on the shell's task manager;
+     * falls back to `am display move-stack`. false when task unknown or
+     * move failed.
+     */
+    boolean moveTask(int taskId, int displayId) = 10;
+
+    /** The display holding task [taskId]; -1 when the task no longer exists. */
+    int displayOfTask(int taskId) = 11;
+
+    /** taskId of the most-recent task on [displayId]; -1 when the display has no tasks. */
+    int topTaskId(int displayId) = 12;
+
+    /** Package of the task's top activity (else base activity); null when unknown. */
+    String packageOfTask(int taskId) = 13;
+
+    /**
+     * Every task on virtual display [displayId], most-recent first.
+     * Bundle keys: taskIds=int[], packages=String[], visible=boolean[].
+     * null when [displayId] is not one of our displays.
+     */
+    Bundle listTasksOn(int displayId) = 14;
+
+    /**
+     * Is [packageName] VISIBLE on the main screen? true = user has it in
+     * front. fail-closed: true when main-screen task list unreadable.
+     */
+    boolean visibleOnMainScreen(String packageName, int userId) = 15;
+
+    /**
+     * Re-pin guard: if [packageName]'s task is not on [displayId], move it
+     * back.
+     * - task already on [displayId] → true
+     * - task VISIBLE on main screen → false (user has it; don't steal)
+     * - task hidden on main / anywhere → moveTask back → confirm → true/false
+     * - task gone entirely → false
+     */
+    boolean repinIfNeeded(int displayId, String packageName) = 16;
+
+    /**
      * The package name of the app most recently started on [displayId]
      * (via {@link #startAppInUser}), or null when nothing was launched
      * there yet.
@@ -104,5 +143,5 @@ interface IMinisShell {
      * through to the default unknown-transaction path and unparcels null, so callers treat null as "unknown" and
      * fall back to a package-less label.
      */
-    String launchedApp(int displayId);
+    String launchedApp(int displayId) = 17;
 }

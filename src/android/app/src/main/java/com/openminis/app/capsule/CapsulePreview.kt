@@ -127,6 +127,7 @@ object MinisCapsule {
                 managed = true
             }
             host = VdOverlayHost(service)
+            AppLogger.info(TAG, "onServiceConnected: active displays = ${MinisAgentDisplayManager.list().map { it.displayId }}")
             refresh()
         }
     }
@@ -166,7 +167,9 @@ object MinisCapsule {
             host = VdOverlayHost(service)
             hostService = service
         }
-        val target = MinisAgentDisplayManager.list().lastOrNull()
+        val displays = MinisAgentDisplayManager.list()
+        AppLogger.info(TAG, "refresh: ${displays.size} display(s) [${displays.map { it.displayId }}], mounting = ${displays.isNotEmpty()}")
+        val target = displays.lastOrNull()
         if (target == null) {
             closeWindows()
             return
@@ -188,7 +191,11 @@ object MinisCapsule {
         )
         val window = host.open(placement, onOutside = null) {
             CapsuleContent(displayId)
-        } ?: return
+        }
+        if (window == null) {
+            AppLogger.warning(TAG, "openCapsule failed: VdOverlayHost.open returned null (overlay window refused?)")
+            return
+        }
         capsulePlacement = placement
         // The whole card is the drag handle; a tap still reaches the frame
         // (drag only after the touch slop). The window follows the finger 1:1.

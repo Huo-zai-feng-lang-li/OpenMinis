@@ -62,7 +62,7 @@ object MinisShellClient {
      * Shizuku recreates user services whose version differs from the
      * running one (ShizukuUserServiceManager's apk-changed handling).
      */
-    private const val HOST_VERSION = 1
+    private const val HOST_VERSION = 2
 
     @Volatile
     private var shell: IMinisShell? = null
@@ -214,6 +214,68 @@ object MinisShellClient {
         return runCatching { s.runSystemCommand(displayId, command) }
             .onFailure { AppLogger.warning(TAG, "runSystemCommand binder call failed: ${it.message}") }
             .getOrNull()
+    }
+
+    // ── task repin surface (HOST_VERSION 2; older helpers lack these) ────
+
+    /** Move [taskId] onto [displayId]; false when unreachable or moved back nowhere. */
+    fun moveTask(taskId: Int, displayId: Int): Boolean {
+        val s = shell ?: return false
+        return runCatching { s.moveTask(taskId, displayId) }
+            .onFailure { lastError = "moveTask binder call failed: ${it.message}" }
+            .getOrDefault(false)
+    }
+
+    /** Which display holds [taskId]; -1 when gone or unreachable. */
+    fun displayOfTask(taskId: Int): Int {
+        val s = shell ?: return -1
+        return runCatching { s.displayOfTask(taskId) }
+            .onFailure { lastError = "displayOfTask binder call failed: ${it.message}" }
+            .getOrDefault(-1)
+    }
+
+    /** Most-recent taskId on [displayId]; -1 when empty or unreachable. */
+    fun topTaskId(displayId: Int): Int {
+        val s = shell ?: return -1
+        return runCatching { s.topTaskId(displayId) }
+            .onFailure { lastError = "topTaskId binder call failed: ${it.message}" }
+            .getOrDefault(-1)
+    }
+
+    /** Package owning [taskId]; null when unknown or unreachable. */
+    fun packageOfTask(taskId: Int): String? {
+        val s = shell ?: return null
+        return runCatching { s.packageOfTask(taskId) }
+            .onFailure { lastError = "packageOfTask binder call failed: ${it.message}" }
+            .getOrNull()
+    }
+
+    /** Task list on [displayId] (taskIds/packages/visible arrays); null when not ours. */
+    fun listTasksOn(displayId: Int): Bundle? {
+        val s = shell ?: return null
+        return runCatching { s.listTasksOn(displayId) }
+            .onFailure { lastError = "listTasksOn binder call failed: ${it.message}" }
+            .getOrNull()
+    }
+
+    /**
+     * Is [packageName] visible on the main screen? fail-closed: when the
+     * binder is unreachable the answer is true (assume the user has it in
+     * front — do not kill or move it).
+     */
+    fun visibleOnMainScreen(packageName: String, userId: Int): Boolean {
+        val s = shell ?: return true
+        return runCatching { s.visibleOnMainScreen(packageName, userId) }
+            .onFailure { lastError = "visibleOnMainScreen binder call failed: ${it.message}" }
+            .getOrDefault(true)
+    }
+
+    /** Re-pin [packageName]'s task back onto [displayId]; false when unreachable. */
+    fun repinIfNeeded(displayId: Int, packageName: String): Boolean {
+        val s = shell ?: return false
+        return runCatching { s.repinIfNeeded(displayId, packageName) }
+            .onFailure { lastError = "repinIfNeeded binder call failed: ${it.message}" }
+            .getOrDefault(false)
     }
 
     /**

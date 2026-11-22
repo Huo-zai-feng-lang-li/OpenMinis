@@ -6,7 +6,6 @@ import com.openminis.app.accessibility.MinisAccessibilityService
 import com.openminis.app.display.AgentDisplayApi
 import com.openminis.app.display.MinisAgentDisplayManager
 import com.openminis.app.display.VdCreateResult
-import com.openminis.app.display.VdTaskPinner
 import com.openminis.app.logging.AppLogger
 import com.openminis.app.offload.ShizukuManager
 import com.openminis.app.sandbox.ExecutionCoordinator
@@ -114,7 +113,9 @@ Subcommands:
                    fails outright — killing the target's own instance is
                    how it actually lands on the virtual display. Needs
                    Shizuku READY (`android-shizuku-cli service status`).
-                   app 被钉在屏上（自动 move-stack 拉回，3 次失败报 APP_MOVES_TASK）
+                   The task is re-pinned after launch (repinIfNeeded);
+                   APP_VISIBLE_ON_MAIN means the user has it in front.
+                   Envelope: pinned (bool), taskId (int).
   run <component> [--user <u>] [--w N --h N --dpi N] [--wait <ms>]
                    One-shot: create the display (leak-sweep included),
                    move <component> onto it, wait for its first
@@ -122,7 +123,10 @@ Subcommands:
                    `framed=false` on --wait timeout / all-black frames
                    (the created display stays up — `release` it after);
                    any earlier failure releases it again.
-                   app 被钉在屏上（自动 move-stack 拉回，3 次失败报 APP_MOVES_TASK）
+                   If the first frame stalls (splash), a nudge cascade
+                   (tap -> BACK -> cold restart) is tried; framedReason
+                   = SPLASH_STALLED when all fail. Envelope: pinned,
+                   taskId, nudgeUsed (tap-center|keyevent-back|cold-restart).
   tap <displayId> <x> <y>
                    Tap on the display via Shizuku: `input -d <displayId>
                    tap <x> <y>`.
@@ -305,12 +309,6 @@ Common flags: --compact / -q / --quiet.
     private fun release(args: OffloadArgs): NativeOffloadResult {
         val id = args.positional.getOrNull(0)?.toIntOrNull()
             ?: return errEnvelope("INVALID_ARGS", "usage: $TOOL release <displayId>", args)
-        // [vd-task-pinner] stop the pinner BEFORE the display goes away:
-        // its restart path would otherwise `am start` the app back onto a
-        // dead display id (the framework rejects it, but the strikes flap
-        // for a while). Unpinning a display that was never pinned is a
-        // no-op.
-        VdTaskPinner.unpin(id)
         if (!MinisAgentDisplayManager.release(id)) {
             return errEnvelope("VD_NOT_FOUND", "no in-process virtual display $id; `list` shows the active ones", args)
         }
@@ -427,7 +425,7 @@ Common flags: --compact / -q / --quiet.
      * order.
      */
     private sealed class LaunchResult {
-        data class Ok(val packageName: String, val stdout: String) : LaunchResult()
+        data class Ok(val packageName: String, val stdout: String, val pinned: Boolean = false) : LaunchResult()
         data class Err(val code: String, val message: String) : LaunchResult()
     }
 
@@ -445,6 +443,19 @@ Common flags: --compact / -q / --quiet.
         // killed on purpose, it has to restart onto this display), then
         // start it into the target display.
         val pkg = component.substringBefore('/')
+        val uid = user.toIntOrNull() ?: 0
+
+        // [vd-repair-spec 4b] never force-stop an app the user has on the
+        // physical main screen in front of them — moving it would steal their
+        // foreground. Fail-closed: unreadable task state counts as "in use".
+        if (MinisShellClient.visibleOnMainScreen(pkg, uid)) {
+            return LaunchResult.Err(
+                "APP_VISIBLE_ON_MAIN",
+                "$pkg is visible on the main screen (user has it in front); not force-stopping " +
+                    "to avoid disturbing the user. Close it on the main screen, or run on a " +
+                    "secondary user where it is not in use.",
+            )
+        }
 
         val stop = shizukuRun(listOf("am", "force-stop", "--user", user, pkg))
         if (stop == null) {
@@ -473,14 +484,16 @@ Common flags: --compact / -q / --quiet.
             )
         }
         return if (r.exitCode == 0) {
-            // [vd-task-pinner] The app may pull its Task back to display 0
-            // after the splash (PDD does) and nothing else watches for it:
-            // start the 2s probe loop that moves it back (move-stack /
-            // am start) and gives up with APP_MOVES_TASK after 3 straight
-            // failed corrections. Idempotent — a re-launch on the same
-            // display just restarts the watch.
-            user.toIntOrNull()?.let { uid -> VdTaskPinner.pin(id, pkg, uid, component) }
-            LaunchResult.Ok(pkg, r.stdout.trim().take(400))
+            // [vd-repair-spec 4b] post-launch repin: the app may pull its Task
+            // back to display 0 during the launch→splash window (WeChat/JD
+            // escape immediately, PDD escapes after its splash).
+            // repinIfNeeded is the IActivityTaskManager moveRootTaskToDisplay
+            // path (Mika ShellService:776-785) — it also refuses to steal a
+            // task that is VISIBLE on the main screen (visibleTaskIdFor
+            // guard), so a repin that returns false means "the app won".
+            val pinned = MinisShellClient.repinIfNeeded(id, pkg)
+            AppLogger.info(TAG, "launch: $pkg on display $id repin=$pinned")
+            LaunchResult.Ok(pkg, r.stdout.trim().take(400), pinned)
         } else LaunchResult.Err("OPERATION_FAILED", "am start failed: ${r.combined.take(500)}")
     }
 
@@ -505,6 +518,8 @@ Common flags: --compact / -q / --quiet.
                     .put("component", component)
                     .put("package", r.packageName)
                     .put("forceStopped", true)
+                    .put("pinned", r.pinned)
+                    .put("taskId", MinisShellClient.topTaskId(id).takeIf { it >= 0 } ?: JSONObject.NULL)
                     .put("output", r.stdout),
                 args,
             )
@@ -550,24 +565,72 @@ Common flags: --compact / -q / --quiet.
         }
         val pkg = component.substringBefore('/')
 
-        // 2b. [vd-task-pinner] start the pin BEFORE the frame wait: an app
-        //     that escapes after its splash (PDD) gets pulled back by the
-        //     pinner's move-stack WITHIN the wait window, so the wait
-        //     yields a live frame instead of timing out on black. This
-        //     re-calls pin on purpose — launchComponent's own pin may have
-        //     started up to 2s earlier; re-pinning resets the watch so
-        //     round 1 lines up with the wait window (idempotent per display).
-        val uid = user.toInt()
-        VdTaskPinner.pin(d.displayId, pkg, uid, component)
-        val taskIdNow = VdTaskPinner.peekTask(pkg)
-            .tasks.firstOrNull { it.display == d.displayId }?.taskId
+        // 2b. [vd-repair-spec 4d] post-launch repin BEFORE the frame wait:
+        //     the app may escape during the launch→splash window (WeChat/JD
+        //     immediately, PDD right after its splash). Give the splash a
+        //     moment to finish (and possibly escape), then pull the task
+        //     back with repinIfNeeded (IActivityTaskManager moveRootTaskTo
+        //     Display; refuses to steal a task the user has visible on the
+        //     main screen). If it still refuses, the display is useless —
+        //     release it and report APP_ESCAPED so the agent can fall back
+        //     to main-screen a11y instead of waiting on a black frame.
+        val pinned0 = (launchOutcome as LaunchResult.Ok).pinned
+        if (!pinned0) {
+            Thread.sleep(3_000)
+            val rePinned = MinisShellClient.repinIfNeeded(d.displayId, pkg)
+            if (!rePinned) {
+                MinisAgentDisplayManager.release(d.displayId)
+                return errEnvelope(
+                    "APP_ESCAPED",
+                    "$pkg is not on display ${d.displayId} after launch + repin; the app likely " +
+                        "detects non-default displays and resists the virtual screen " +
+                        "(display released). Fall back to main-screen a11y or tell the user.", args)
+            }
+        }
+        val taskIdNow = MinisShellClient.topTaskId(d.displayId)
 
         // 3. wait for the first real frame: skip null and black, keep
         //    waiting otherwise.
-        val waited = waitForFirstFrame(d, waitMs, pkg)
+        var waited = waitForFirstFrame(d, waitMs)
+        // [vd-repair-spec 4d + cascade] when the wait times out the display
+        // is either stalled on a splash (PDD/淘宝 卡死型) or the app escaped
+        // and the screen is black (逃逸型, repinIfNeeded already said so in
+        // 2b — in that case we would have returned APP_ESCAPED above, so
+        // here it is the stalled class). Nudge cascade: tap center → BACK →
+        // cold restart on the display; the first nudge that yields a live
+        // frame wins. Re-repinned after each nudge (the tap/BACK can itself
+        // make the app move).
+        var nudgeUsed = ""
+        if (!waited.framed) {
+            val cx = d.width / 2
+            val cy = d.height / 2
+            shizukuRun(listOf("input", "-d", d.displayId.toString(), "tap", cx.toString(), cy.toString()))
+            MinisShellClient.repinIfNeeded(d.displayId, pkg)
+            if (shortFrameWait(d, 5_000L)) nudgeUsed = "tap-center"
+            if (nudgeUsed.isEmpty()) {
+                shizukuRun(listOf("input", "-d", d.displayId.toString(), "keyevent", "4"))
+                MinisShellClient.repinIfNeeded(d.displayId, pkg)
+                if (shortFrameWait(d, 5_000L)) nudgeUsed = "keyevent-back"
+            }
+            if (nudgeUsed.isEmpty()) {
+                shizukuRun(listOf("am", "force-stop", "--user", user, pkg))
+                shizukuRun(listOf("am", "start", "--user", user, "--display", d.displayId.toString(), "-n", component))
+                MinisShellClient.repinIfNeeded(d.displayId, pkg)
+                if (shortFrameWait(d, 8_000L)) nudgeUsed = "cold-restart"
+            }
+            if (nudgeUsed.isNotEmpty()) {
+                waited = FrameWaitResult(true, "first frame via nudge: $nudgeUsed")
+            } else {
+                waited = FrameWaitResult(false,
+                    "SPLASH_STALLED: tap-center/BACK/cold-restart nudge all tried on display " +
+                        "${d.displayId}; $pkg may not run on an untrusted virtual display " +
+                        "(agent: report honestly, or operate it on the main screen instead)")
+            }
+        }
         val framed = waited.framed
         val waitedMs = SystemClock.elapsedRealtime() - t0
-        AppLogger.info(TAG, "run: display ${d.displayId} $component framed=$framed waitedMs=$waitedMs")
+        val pinnedFinal = MinisShellClient.repinIfNeeded(d.displayId, pkg)
+        AppLogger.info(TAG, "run: display ${d.displayId} $component framed=$framed nudge=$nudgeUsed pinned=$pinnedFinal waitedMs=$waitedMs")
 
         // 4. shot — write what we have. On timeout the frame may be
         //    missing or all-black; a partial PNG is still useful, so
@@ -581,15 +644,15 @@ Common flags: --compact / -q / --quiet.
             .put("framed", framed)
             .put("framedReason", waited.reason)
             .put("waitedMs", waitedMs)
-            // [vd-task-pinner] the pin state as of the frame-wait start:
-            // `pinned` says the watch is running (it dies with the display
-            // release or the APP_MOVES_TASK / 15-min idle stop), `taskId`
-            // is the task id that `am display move-stack` takes (JSON null
-            // when the probe found no task yet — the app is still starting
-            // up; JSONObject.NULL so it serializes as a real null, not an
-            // NPE from put(String, null)).
-            .put("pinned", true)
-            .put("taskId", taskIdNow ?: JSONObject.NULL)
+            // [vd-repair-spec 4d] `pinned` = the FINAL repin state (one more
+            // repinIfNeeded as the authoritative answer: does the task sit
+            // on the display now); `taskId` = the task `am display
+            // move-stack` takes (topTaskId; JSON null when no task yet);
+            // `nudgeUsed` names the nudge that un-stuck the splash (JSON
+            // null when no nudge was needed).
+            .put("pinned", pinnedFinal)
+            .put("taskId", taskIdNow.takeIf { it >= 0 } ?: JSONObject.NULL)
+            .put("nudgeUsed", if (nudgeUsed.isEmpty()) JSONObject.NULL else nudgeUsed)
         val png = d.latestFramePng()
         if (png != null) {
             when (val w = writePng(d, png, sessionId)) {
@@ -616,22 +679,18 @@ Common flags: --compact / -q / --quiet.
     private data class FrameWaitResult(val framed: Boolean, val reason: String)
 
     /**
-     * Frame-wait timed out with no frame: before blaming the pipeline,
-     * check where the app's task actually is — reusing the pinner's
-     * dumpsys parse ([VdTaskPinner.peekTask]). The task on another
-     * display (or gone) means a black screen is EXPECTED and the
-     * `framedReason` should name it (APP_ESCAPED_DISPLAY + the pinner's
-     * strike count, so the agent knows the pinner already fought it).
-     * The task on the display means the black screen is a real
-     * frame-pipeline symptom — keep the generic reason.
+     * Brief blocking wait (up to [ms]) for a live frame after a nudge.
+     * Returns true as soon as the display yields a non-black frame; false
+     * on timeout. Used by the run nudge cascade to know which nudge
+     * un-stuck a stalled splash.
      */
-    private fun escapeReason(d: AgentDisplayApi, pkg: String): String? {
-        val peek = VdTaskPinner.peekTask(pkg)
-        if (!peek.probed) return null // dumpsys/Shizuku unavailable — don't guess
-        val onDisplay = peek.tasks.any { it.display == d.displayId }
-        if (onDisplay) return null
-        return "APP_ESCAPED_DISPLAY: $pkg task not on display ${d.displayId} " +
-            "(pinner strikes=${VdTaskPinner.strikes(d.displayId)})"
+    private fun shortFrameWait(d: AgentDisplayApi, ms: Long): Boolean {
+        val deadline = SystemClock.elapsedRealtime() + ms
+        while (SystemClock.elapsedRealtime() < deadline) {
+            if (d.frames.value != null && d.isLastFrameBlack() != true) return true
+            Thread.sleep(250L)
+        }
+        return d.frames.value != null && d.isLastFrameBlack() != true
     }
 
     /**
@@ -646,7 +705,6 @@ Common flags: --compact / -q / --quiet.
     private fun waitForFirstFrame(
         d: AgentDisplayApi,
         timeoutMs: Long,
-        pkg: String,
     ): FrameWaitResult {
         val initial = d.frames.value
         if (initial != null && d.isLastFrameBlack() != true) {
@@ -681,11 +739,10 @@ Common flags: --compact / -q / --quiet.
             // downgraded it); count it as framed, the PNG tells the truth.
             FrameWaitResult(true, "full-res frame present although preview stream is null/black")
         } else {
-            // [vd-task-pinner] a black screen is expected when the app's
-            // task escaped the display — name it (with the pinner's strike
-            // count) instead of the generic timeout; when the task IS on
-            // the display keep the generic reason (real pipeline symptom).
-            FrameWaitResult(false, escapeReason(d, pkg) ?: "no non-black frame within ${timeoutMs}ms")
+            // No frame within the window and no full-res fallback either.
+            // (The escape vs. splash distinction is handled by the caller's
+            // post-launch repin + nudge cascade, not here.)
+            FrameWaitResult(false, "no non-black frame within ${timeoutMs}ms")
         }
     }
 
@@ -704,6 +761,14 @@ Common flags: --compact / -q / --quiet.
             ?: return errEnvelope("VD_NOT_FOUND",
                 "no active virtual display $id; `create` it first " +
                     "(main-screen input is `android-shizuku-cli input tap`, not this tool)", args)
+
+        // [vd-repair-spec 4e] auto-repin before the tap: if the last-launched
+        // app escaped to the main screen, pull it back first so this tap
+        // lands on the task that is actually on this display (repinIfNeeded
+        // refuses to steal a task the user has visible on the main screen).
+        val topId = MinisShellClient.topTaskId(id)
+        val topPkg = MinisShellClient.packageOfTask(topId)
+        if (topPkg != null) MinisShellClient.repinIfNeeded(id, topPkg)
 
         val r = shizukuRun(listOf("input", "-d", id.toString(), "tap", x.toString(), y.toString()))
         if (r == null) {

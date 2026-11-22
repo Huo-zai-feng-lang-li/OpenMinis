@@ -133,6 +133,41 @@ class MinisShellHostService : IMinisShell.Stub {
         return delegate.launchedApp(displayId)
     }
 
+    override fun moveTask(taskId: Int, displayId: Int): Boolean {
+        requireCaller()
+        return delegate.moveTask(taskId, displayId)
+    }
+
+    override fun displayOfTask(taskId: Int): Int {
+        requireCaller()
+        return delegate.displayOfTask(taskId)
+    }
+
+    override fun topTaskId(displayId: Int): Int {
+        requireCaller()
+        return delegate.topTaskId(displayId)
+    }
+
+    override fun packageOfTask(taskId: Int): String? {
+        requireCaller()
+        return delegate.packageOfTask(taskId)
+    }
+
+    override fun listTasksOn(displayId: Int): Bundle? {
+        requireCaller()
+        return delegate.listTasksOn(displayId)
+    }
+
+    override fun visibleOnMainScreen(packageName: String, userId: Int): Boolean {
+        requireCaller()
+        return delegate.visibleOnMainScreen(packageName, userId)
+    }
+
+    override fun repinIfNeeded(displayId: Int, packageName: String): Boolean {
+        requireCaller()
+        return delegate.repinIfNeeded(displayId, packageName)
+    }
+
     /**
      * Defense in depth: the binder only ever reaches the Minis app through
      * Shizuku, but refuse anyone else outright (Mika's destroy-guard shape,
@@ -272,6 +307,15 @@ internal class MinisShellDisplay(
         lastLaunched.clear()
         all.forEach { runCatching { it.release() } }
     }
+
+    /**
+     * The package name most recently started on [displayId] via
+     * [startAppInUser] (null when nothing was launched there yet). Backs
+     * [launchedApp] on the service side; the island-resident notification
+     * shows it as the "running · pkg" subtitle. Non-synchronized read is
+     * fine: lastLaunched is a plain HashMap mutated on the binder thread.
+     */
+    fun launchedApp(displayId: Int): String? = lastLaunched[displayId]?.first
 
     private fun pokeDisplay(displayId: Int): Boolean {
         val pair = userActivity ?: return false
@@ -514,6 +558,168 @@ internal class MinisShellDisplay(
     }.getOrElse {
         Log.d(TAG, "user info unavailable for $userId, flag check skipped")
         true
+    }
+
+    // ── task repin (ported from Mika ShellService:680–786) ──────────────
+
+    /** IActivityTaskManager.moveRootTaskToDisplay (Mika ShellService:779). */
+    fun moveTask(taskId: Int, displayId: Int): Boolean = try {
+        taskManager.javaClass
+            .getMethod("moveRootTaskToDisplay", Int::class.java, Int::class.java)
+            .invoke(taskManager, taskId, displayId)
+        true
+    } catch (t: Throwable) {
+        Log.w(TAG, "moveRootTaskToDisplay unavailable, falling back to am", t)
+        exec("am", "display", "move-stack", taskId.toString(), displayId.toString()) == 0
+    }
+
+    /** IActivityTaskManager.getTasks for one display (Mika ShellService:694–706).
+     *  API 33+ has 4-arg overload with displayId; older systems fetch all and filter. */
+    private fun tasksOn(displayId: Int): List<Any> {
+        val methods = taskManager.javaClass.methods.filter { it.name == "getTasks" }
+        val withDisplay = methods.firstOrNull { it.parameterTypes.size == 4 }
+        val tasks = if (withDisplay != null) {
+            withDisplay.invoke(taskManager, MAX_TASKS, false, false, displayId)
+        } else {
+            methods.first { it.parameterTypes.size == 3 }
+                .invoke(taskManager, MAX_TASKS, false, false)
+        } as List<*>
+        val displayField = TASK_INFO.getField("displayId")
+        return tasks.filterNotNull().filter { displayField.getInt(it) == displayId }
+    }
+
+    /** Tasks on every display (Mika ShellService:709–719). */
+    private fun allTasks(): List<Any> {
+        val methods = taskManager.javaClass.methods.filter { it.name == "getTasks" }
+        val withDisplay = methods.firstOrNull { it.parameterTypes.size == 4 }
+        val tasks = if (withDisplay != null) {
+            withDisplay.invoke(taskManager, MAX_TASKS, false, false, Display.INVALID_DISPLAY)
+        } else {
+            methods.first { it.parameterTypes.size == 3 }
+                .invoke(taskManager, MAX_TASKS, false, false)
+        } as List<*>
+        return tasks.filterNotNull()
+    }
+
+    /** The TaskInfo row for [taskId] across all displays; null when gone (Mika:720–724). */
+    private fun task(taskId: Int): Any? {
+        val idField = TASK_INFO.getField("taskId")
+        return allTasks().firstOrNull { idField.getInt(it) == taskId }
+    }
+
+    /** Packages of a task's base/top activity (Mika:680). */
+    private fun packagesOf(t: Any): List<String> =
+        listOf("baseActivity", "topActivity").mapNotNull {
+            (TASK_INFO.getField(it).get(t) as? ComponentName)?.packageName
+        }
+
+    /** Which display holds [taskId]; -1 when gone (Mika:726–731). */
+    fun displayOfTask(taskId: Int): Int = try {
+        task(taskId)?.let { TASK_INFO.getField("displayId").getInt(it) } ?: -1
+    } catch (t: Throwable) {
+        Log.e(TAG, "displayOfTask failed", t)
+        -1
+    }
+
+    /** Most-recent taskId on [displayId]; -1 when empty (Mika:771–776). */
+    fun topTaskId(displayId: Int): Int {
+        if (!ownDisplay(displayId) && displayId != 0) return -1
+        return try {
+            tasksOn(displayId).firstOrNull()
+                ?.let { TASK_INFO.getField("taskId").getInt(it) } ?: -1
+        } catch (t: Throwable) {
+            Log.e(TAG, "topTaskId failed", t)
+            -1
+        }
+    }
+
+    /** Package owning [taskId] (top, else base activity); null when unknown (Mika:758–764). */
+    fun packageOfTask(taskId: Int): String? = try {
+        task(taskId)?.let { t ->
+            listOf("topActivity", "baseActivity").firstNotNullOfOrNull {
+                (TASK_INFO.getField(it).get(t) as? ComponentName)?.packageName
+            }
+        }
+    } catch (t: Throwable) {
+        Log.e(TAG, "packageOfTask failed", t)
+        null
+    }
+
+    /** taskId of [packageName]'s VISIBLE task on [displayId]; -1 when none. */
+    private fun visibleTaskIdFor(displayId: Int, packageName: String): Int {
+        val visible = runCatching { TASK_INFO.getField("isVisible") }.getOrNull()
+        val id = TASK_INFO.getField("taskId")
+        return tasksOn(displayId).map { id.getInt(it) }.firstOrNull { tid ->
+            val t = task(tid) ?: return@firstOrNull false
+            packageName in packagesOf(t) && (visible?.getBoolean(t) ?: false)
+        } ?: -1
+    }
+
+    /**
+     * Re-pin guard (equivalent to Mika resumeKept:1083 + sendBackToClose:903):
+     * if [packageName]'s task is NOT on [displayId], move it back.
+     *  - task already on displayId → true
+     *  - task VISIBLE on main screen → false (user has it; don't steal)
+     *  - task hidden somewhere → moveTask back → confirm
+     *  - task gone entirely → false
+     */
+    fun repinIfNeeded(displayId: Int, packageName: String): Boolean {
+        if (!ownDisplay(displayId)) return false
+        return try {
+            // 1. already on our display?
+            if (visibleTaskIdFor(displayId, packageName) != -1) return true
+            // 2. visible on main screen? don't steal from user
+            if (visibleTaskIdFor(Display.DEFAULT_DISPLAY, packageName) != -1) return false
+            // 3. hidden task somewhere? move it back
+            val id = TASK_INFO.getField("taskId")
+            val visible = runCatching { TASK_INFO.getField("isVisible") }.getOrNull()
+            val hidden = allTasks().map { id.getInt(it) }.firstOrNull { tid ->
+                val t = task(tid) ?: return@firstOrNull false
+                packageName in packagesOf(t) && (visible?.getBoolean(t) ?: false) == false
+            } ?: return false
+            moveTask(hidden, displayId) && displayOfTask(hidden) == displayId
+        } catch (t: Throwable) {
+            Log.w(TAG, "repinIfNeeded($packageName, $displayId) failed", t)
+            false
+        }
+    }
+
+    /**
+     * Visible-on-main check (Mika inUseOnMainScreen:685–690).
+     * Call BEFORE any force-stop: true = user has [packageName] in front on the
+     * physical main screen → do not kill or move it.
+     * fail-closed: unreadable main-screen task list → true.
+     */
+    fun visibleOnMainScreen(packageName: String, userId: Int): Boolean {
+        val anyUser = userId == myUser
+        val visibleField = runCatching { TASK_INFO.getField("isVisible") }.getOrNull()
+        val userField = runCatching { TASK_INFO.getField("userId") }.getOrNull()
+        val main = runCatching { tasksOn(Display.DEFAULT_DISPLAY) }
+        if (main.isFailure) {
+            Log.w(TAG, "cannot read main-screen tasks; treating $packageName as in use")
+            return true
+        }
+        return main.getOrEmpty().withIndex().any { (index, t) ->
+            val pkg = packageName in packagesOf(t)
+            val userOk = if (anyUser) true else {
+                val tUser = userField?.let { runCatching { it.getInt(t) }.getOrNull() }
+                tUser == null || tUser == userId
+            }
+            pkg && userOk && (visibleField?.getBoolean(t) ?: (index == 0))
+        }
+    }
+
+    /** Bundle for AIDL listTasksOn. */
+    fun listTasksOn(displayId: Int): Bundle? {
+        if (displayId != 0 && !ownDisplay(displayId)) return null
+        val rows = tasksOn(displayId)
+        val visible = runCatching { TASK_INFO.getField("isVisible") }.getOrNull()
+        val id = TASK_INFO.getField("taskId")
+        val b = Bundle()
+        b.putIntArray("taskIds", rows.map { id.getInt(it) }.toIntArray())
+        b.putStringArray("packages", rows.map { packagesOf(it).firstOrNull() }.toTypedArray())
+        b.putBooleanArray("visible", rows.map { visible?.getBoolean(it) ?: false }.toBooleanArray())
+        return b
     }
 
     // ── input injection ───────────────────────────────────────────────────
@@ -762,6 +968,10 @@ internal class MinisShellDisplay(
 
         private const val TAP_MS = 50L
         private const val CMD_TIMEOUT_S = 10L
+        /** Max TaskInfo rows fetched per IActivityTaskManager.getTasks call (Mika ShellService:1808). */
+        private const val MAX_TASKS = 100
+        /** android.app.TaskInfo (Mika ShellService:1838): fields read reflectively. */
+        private val TASK_INFO: Class<*> by lazy { Class.forName("android.app.TaskInfo") }
         private const val COMMAND_MAX_LEN = 4_000
         private const val COMMAND_OUTPUT_MAX = 64 * 1024
         private const val READER_JOIN_MS = 1_000L

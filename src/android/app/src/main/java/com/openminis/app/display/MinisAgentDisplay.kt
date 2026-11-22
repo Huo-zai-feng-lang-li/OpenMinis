@@ -867,10 +867,6 @@ object MinisAgentDisplayManager {
         }
         if (removed.isEmpty()) return
         removed.forEach { awake.stop(it.displayId); it.release() }
-        // [vd-task-pinner] the pinner's loops are keyed on these displays;
-        // the process dies with them anyway, but stop them deliberately so
-        // no dumpsys flap races the teardown.
-        VdTaskPinner.unpinAll()
         notifyChanged()
     }
 
