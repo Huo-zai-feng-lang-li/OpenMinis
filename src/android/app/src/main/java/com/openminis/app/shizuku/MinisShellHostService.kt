@@ -40,6 +40,7 @@ import android.os.UserManager
 import android.util.Log
 import android.view.InputDevice
 import android.view.InputEvent
+import android.view.Display
 import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -565,7 +566,7 @@ internal class MinisShellDisplay(
     /** IActivityTaskManager.moveRootTaskToDisplay (Mika ShellService:779). */
     fun moveTask(taskId: Int, displayId: Int): Boolean = try {
         taskManager.javaClass
-            .getMethod("moveRootTaskToDisplay", Int::class.java, Int::class.java)
+            .getMethod("moveRootTaskToDisplay", Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)
             .invoke(taskManager, taskId, displayId)
         true
     } catch (t: Throwable) {
@@ -699,7 +700,7 @@ internal class MinisShellDisplay(
             Log.w(TAG, "cannot read main-screen tasks; treating $packageName as in use")
             return true
         }
-        return main.getOrEmpty().withIndex().any { (index, t) ->
+        return (main.getOrNull() ?: emptyList()).withIndex().any { (index, t) ->
             val pkg = packageName in packagesOf(t)
             val userOk = if (anyUser) true else {
                 val tUser = userField?.let { runCatching { it.getInt(t) }.getOrNull() }

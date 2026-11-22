@@ -873,7 +873,7 @@ Common flags: --compact / -q / --quiet.
             .put("text", text)
             .put("type", type)
             .put("matches", matches)
-        if (matches.isEmpty()) {
+        if (matches.length() == 0) {
             payload.put("hint", "text not found in a11y tree of display $id; try shot + visual")
         }
         return okEnvelope(payload, args)
