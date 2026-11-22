@@ -3790,9 +3790,6 @@ fun ChatScreen(
             // its id on the first message, while `sessionId` here stays the
             // draft id - so the pill matched no task in a chat started fresh.
             ScheduledTaskPill(currentSessionId = { viewModel.currentSessionId })
-            // [T-subagent-pill] Sub agent work of THIS chat, pinned the same
-            // place and by the same real-id rule as the scheduled pill.
-            SubAgentPill(currentSessionId = { viewModel.currentSessionId })
         } },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
