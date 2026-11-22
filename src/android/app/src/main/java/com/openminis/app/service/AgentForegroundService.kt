@@ -1471,6 +1471,26 @@ class AgentForegroundService : Service() {
             this,
             dynamicIslandUserEnabled,
         )
+        // [T-island-media-subtitle] The MIUI media panel draws its two text
+        // lines from the MediaSession metadata (big line = TITLE, small line
+        // = ARTIST), NOT from the content title/text - so the dark card
+        // showed "Minis / Minis" no matter what the agent was doing. Feed
+        // the phase's status line into ARTIST so the card carries the task
+        // text: tool status + counter, 思考中…, 正在输出…, 任务已完成,
+        // scheduled wait, 等待你的回答….
+        val mediaSubtitle = when (phase) {
+            AgentPhase.TOOL -> withRunCounter(humanizeToolStatus(toolStatus, toolName), firingCounter)
+            AgentPhase.THINKING -> getString(R.string.overlay_thinking)
+            AgentPhase.GENERATING -> getString(R.string.overlay_streaming)
+            AgentPhase.COMPLETED -> if (sessionCount > 0) {
+                getString(completedTextResFor(sessionCount), sessionLabel, timeString)
+            } else {
+                getString(completedTextResFor(0), timeString)
+            }
+            AgentPhase.WAITING -> shortCritical ?: getString(R.string.notif_scheduled_waiting)
+            AgentPhase.ASKING -> getString(R.string.user_ask_waiting)
+            AgentPhase.IDLE -> "Minis"
+        }
         if (dynamicIslandOn && !presenceOnly && Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) {
             return buildPromotedNotification(
                 titleText = titleText,
@@ -1482,6 +1502,7 @@ class AgentForegroundService : Service() {
                 clock = clock,
                 contentIntent = pendingIntent,
                 stopIntent = stopPendingIntent,
+                mediaSubtitle = mediaSubtitle,
             )
         }
 
@@ -1547,6 +1568,7 @@ class AgentForegroundService : Service() {
         clock: NotificationClock,
         contentIntent: PendingIntent,
         stopIntent: PendingIntent,
+        mediaSubtitle: String,
     ): Notification {
         // [T-android-dynamic-island] A ProgressStyle only counts as a valid
         // *promotable* style when it carries at least one progress segment with
@@ -1598,7 +1620,7 @@ class AgentForegroundService : Service() {
                 // subtitle come from the builder's content title/text and the
                 // session's metadata artwork.
                 Notification.MediaStyle()
-                    .setMediaSession(islandMediaSession(stopIntent, titleText).sessionToken)
+                    .setMediaSession(islandMediaSession(stopIntent, titleText, mediaSubtitle).sessionToken)
                     // API 36's MediaStyle kept only setShowActionsInCompactView
                     // (verified against the platform-36 stubs with javap): zero
                     // compact media buttons - the Stop control is the
@@ -1740,7 +1762,11 @@ class AgentForegroundService : Service() {
      * reads its metadata for the artwork and routes the compact stop control
      * back into our stop PendingIntent.
      */
-    private fun islandMediaSession(stopIntent: PendingIntent, title: String): android.media.session.MediaSession {
+    private fun islandMediaSession(
+        stopIntent: PendingIntent,
+        title: String,
+        subtitle: String,
+    ): android.media.session.MediaSession {
         val session = islandMediaSessionRef
             ?: android.media.session.MediaSession(applicationContext, "MinisAgentIsland")
                 .also { islandMediaSessionRef = it }
@@ -1757,7 +1783,9 @@ class AgentForegroundService : Service() {
         runCatching {
             val art = islandLargeIcon()
             session.setMetadata(android.media.MediaMetadata.Builder()
-                .putString(android.media.MediaMetadata.METADATA_KEY_ARTIST, "Minis")
+                // [T-island-media-subtitle] The small line of MIUI's media
+                // panel reads ARTIST - carry the phase's task status there.
+                .putString(android.media.MediaMetadata.METADATA_KEY_ARTIST, subtitle)
                 .putString(android.media.MediaMetadata.METADATA_KEY_TITLE, title)
                 .apply { art?.let { putBitmap(android.media.MediaMetadata.METADATA_KEY_ALBUM_ART, it) } }
                 .build())
