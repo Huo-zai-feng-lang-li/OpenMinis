@@ -47,7 +47,6 @@ import android.view.MotionEvent
 import android.view.Surface
 import androidx.annotation.Keep
 import com.openminis.app.BuildConfig
-import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Method
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -564,31 +563,20 @@ internal class MinisShellDisplay(
 
     // ── task repin (ported from Mika ShellService:680–786) ──────────────
 
-    /** IActivityTaskManager.moveRootTaskToDisplay (Mika ShellService:779). */
+    /** IActivityTaskManager.moveRootTaskToDisplay (Mika ShellService:779).
+     *  Direct reflection may fail (SecurityException in shell mode);
+     *  `am display move-stack` goes through the shell command framework
+     *  (system-privileged) and works in shell mode — ALWAYS try it as fallback. */
     fun moveTask(taskId: Int, displayId: Int): Boolean = try {
         taskManager.javaClass
             .getMethod("moveRootTaskToDisplay", Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)
             .invoke(taskManager, taskId, displayId)
         true
-    } catch (e: SecurityException) {
-        Log.w(TAG, "moveTask: permission denied (need root-mode Shizuku for INTERNAL_SYSTEM_WINDOW)", e)
-        false
-    } catch (e: InvocationTargetException) {
-        // Method.invoke wraps the exception the underlying call threw, so a
-        // binder-remote SecurityException (moveRootTaskToDisplay refused)
-        // shows up as the CAUSE here, not as a direct SecurityException.
-        when (val cause = e.targetException) {
-            is SecurityException -> {
-                Log.w(TAG, "moveTask: permission denied (need root-mode Shizuku for INTERNAL_SYSTEM_WINDOW)", cause)
-                false
-            }
-            else -> {
-                Log.w(TAG, "moveRootTaskToDisplay unavailable, falling back to am", cause)
-                exec("am", "display", "move-stack", taskId.toString(), displayId.toString()) == 0
-            }
-        }
     } catch (t: Throwable) {
-        Log.w(TAG, "moveRootTaskToDisplay unavailable, falling back to am", t)
+        // Reflection failed (SecurityException in shell mode, NoSuchMethod, …).
+        // `am` goes through ActivityManagerShellCommand (system-privileged),
+        // so it can succeed where the direct binder call was refused.
+        Log.w(TAG, "moveRootTaskToDisplay failed ($t), falling back to am", t)
         exec("am", "display", "move-stack", taskId.toString(), displayId.toString()) == 0
     }
 
