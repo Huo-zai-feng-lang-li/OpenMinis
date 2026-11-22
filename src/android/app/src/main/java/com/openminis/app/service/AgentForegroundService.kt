@@ -1598,10 +1598,15 @@ class AgentForegroundService : Service() {
         // promotion (hasPromotableCharacteristics below); anything else
         // falls through to the ProgressStyle variant, which keeps the chip.
         val largeIcon = islandLargeIcon()
+        // [T-island-no-seekbar] No MediaSession on the media variant: the
+        // session's transport row is what drew the 00:00-00:00 seek bar the
+        // user wants gone; the dark treatment is driven by category +
+        // MediaStyle alone (verified on-device in 1.32), so the card keeps
+        // its look. The small line now rides on contentText.
         val mediaBuilder = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(smallIcon)
             .setContentTitle(titleText)
-            .setContentText(collapsedText)
+            .setContentText(mediaSubtitle)
             .setOngoing(true)
             .setShowWhen(clock.showWhen)
             .setWhen(clock.whenMs)
@@ -1619,12 +1624,13 @@ class AgentForegroundService : Service() {
                 // Description (those are androidx additions) - the title and
                 // subtitle come from the builder's content title/text and the
                 // session's metadata artwork.
+                // [T-island-no-seekbar] MediaStyle WITHOUT a session token:
+                // no transport state means MIUI draws no seek bar and no
+                // play/pause glyph; title/subtitle come from the content
+                // title/text above. (1.31 added the session to kill the
+                // empty "暂无播放" tile - content now comes from the
+                // content fields, so a session is not needed.)
                 Notification.MediaStyle()
-                    .setMediaSession(islandMediaSession(stopIntent, titleText, mediaSubtitle).sessionToken)
-                    // API 36's MediaStyle kept only setShowActionsInCompactView
-                    // (verified against the platform-36 stubs with javap): zero
-                    // compact media buttons - the Stop control is the
-                    // Notification.Action row below, like a plain FGS action.
                     .setShowActionsInCompactView(),
             )
         largeIcon?.let { mediaBuilder.setLargeIcon(it) }
