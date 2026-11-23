@@ -42,6 +42,41 @@ object DeepLinkCoordinator {
     }
 
     /**
+     * [T-bgnotif-deeplink-focus] 1.54: an OpenSession deep link that
+     * arrived while navigation was not ready yet (a notification tap on
+     * a dead or backgrounded app): MainActivity buffers the target here;
+     * AppNavigation consumes it once the NavHost is alive, so the link
+     * is never dropped into the session list.
+     */
+    private val _pendingSessionOpen = MutableStateFlow<String?>(null)
+    val pendingSessionOpen: StateFlow<String?> = _pendingSessionOpen.asStateFlow()
+
+    fun setPendingSessionOpen(sessionId: String) { _pendingSessionOpen.value = sessionId }
+
+    fun consumePendingSessionOpen(): String? {
+        val current = _pendingSessionOpen.value
+        _pendingSessionOpen.value = null
+        return current
+    }
+
+    /**
+     * [T-bgnotif-deeplink-focus] 1.54: the session whose composer should
+     * grab focus (and the soft keyboard) when its ChatScreen lands -
+     * set on every OpenSession that came from a notification tap,
+     * consumed exactly once by that ChatScreen.
+     */
+    private val _pendingComposerFocus = MutableStateFlow<String?>(null)
+    val pendingComposerFocus: StateFlow<String?> = _pendingComposerFocus.asStateFlow()
+
+    fun setPendingComposerFocus(sessionId: String) { _pendingComposerFocus.value = sessionId }
+
+    fun consumePendingComposerFocus(): String? {
+        val current = _pendingComposerFocus.value
+        _pendingComposerFocus.value = null
+        return current
+    }
+
+    /**
      * Pending pinned-shortcut HTML preview: filesystem path + cached title.
      * MainActivity sets this on `minis://preview/html` deep link; ChatScreen
      * reads it on first composition and routes into WebPreviewFullscreen.

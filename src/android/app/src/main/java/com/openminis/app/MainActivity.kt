@@ -738,12 +738,25 @@ class MainActivity : ComponentActivity() {
 
     private fun handleDeepLink(uri: Uri?) {
         val action = DeepLinkHandler.parse(uri)
+        // [T-bgnotif-deeplink-focus] 1.54: a notification tap can hit
+        // onNewIntent before the NavHost has attached (dead/backgrounded
+        // app). Buffer the target session so AppNavigation's
+        // LaunchedEffect picks it up instead of the tap landing on the
+        // session list.
+        if (action is DeepLinkAction.OpenSession && navController == null) {
+            DeepLinkCoordinator.setPendingSessionOpen(action.sessionId)
+            DeepLinkCoordinator.setPendingComposerFocus(action.sessionId)
+            return
+        }
         val nav = navController ?: return
         when (action) {
             is DeepLinkAction.OpenTerminal -> {
                 nav.navigate(Routes.terminal(action.initCommand))
             }
             is DeepLinkAction.OpenSession -> {
+                // [T-bgnotif-deeplink-focus] 1.54: land in the session
+                // AND focus its composer.
+                DeepLinkCoordinator.setPendingComposerFocus(action.sessionId)
                 // T-double-chat-fix (secondary): mirror AppNavigation's
                 // OpenSession options so a runtime deep-link (notification /
                 // shortcut / onNewIntent) can't stack a duplicate chat on

@@ -280,6 +280,25 @@ fun AppNavigation(
         (context.applicationContext as com.openminis.app.MinisApp).mountedFoldersStore
     }
 
+    // [T-bgnotif-deeplink-focus] 1.54: an OpenSession that arrived
+    // before this NavHost existed (notification tap on a dead app,
+    // buffered in DeepLinkCoordinator by MainActivity) - run it now,
+    // the graph is alive.
+    LaunchedEffect(Unit) {
+        val sid = DeepLinkCoordinator.consumePendingSessionOpen()
+        if (sid != null) {
+            DeepLinkCoordinator.setPendingComposerFocus(sid)
+            navController.safeNavigate(Routes.chat(sid)) {
+                popUpTo(Routes.SESSION_LIST) {
+                    inclusive = false
+                    saveState = true
+                }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+    }
+
     // Handle initial deep link after composition
     LaunchedEffect(initialDeepLink) {
         when (initialDeepLink) {
@@ -287,6 +306,9 @@ fun AppNavigation(
                 navController.safeNavigate(Routes.terminal(initialDeepLink.initCommand))
             }
             is DeepLinkAction.OpenSession -> {
+                // [T-bgnotif-deeplink-focus] 1.54: land in the session AND
+                // focus its composer (ChatScreen consumes the flag).
+                DeepLinkCoordinator.setPendingComposerFocus(initialDeepLink.sessionId)
                 // T-double-chat-fix: on process-death recreation NavController
                 // auto-restores [SESSION_LIST, chat/<id>] AND MainActivity
                 // synthesizes an OpenSession deep-link from saved state. A

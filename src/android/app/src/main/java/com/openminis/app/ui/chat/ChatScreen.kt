@@ -2655,8 +2655,16 @@ fun ChatScreen(
     // (see ChatSplitScaffold's focusable detail pane) - except with a
     // hardware keyboard, where focusing the composer raises no soft keyboard
     // and lets the user type straight away, as it did before.
+    // [T-bgnotif-deeplink-focus] 1.54: a notification deep-link into
+    // THIS session asks for the composer focused on arrival. One-shot;
+    // a sibling pane composing at the same moment must not eat the
+    // flag, so it is put back when it names another session.
+    val pendingFocus = com.openminis.app.deeplink.DeepLinkCoordinator.consumePendingComposerFocus()
+    if (pendingFocus != null && pendingFocus != sessionId) {
+        com.openminis.app.deeplink.DeepLinkCoordinator.setPendingComposerFocus(pendingFocus)
+    }
     LaunchedEffect(sessionId) {
-        if (sessionId.startsWith("__new__") || hasHardwareKeyboard) {
+        if (sessionId.startsWith("__new__") || hasHardwareKeyboard || pendingFocus == sessionId) {
             // Small delay to let the layout settle before requesting focus
             kotlinx.coroutines.delay(300)
             try {
