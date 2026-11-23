@@ -80,7 +80,6 @@ import com.openminis.app.agent.jobs.AgentJob
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
-import com.openminis.app.debug.ChatViewModelStore
 import com.openminis.app.debug.HeadlessChatRunner
 import kotlinx.coroutines.delay
 import com.openminis.app.agent.jobs.AgentJobRegistry
@@ -522,7 +521,6 @@ private fun SubAgentPillCard(
 }
 
 /** The status dialog the tap opens: identity + live facts + the two actions. */
-@Composable
 @Composable
 /**
  * [T-subagent-pill-full-detail] 1.53: tapping a row in the pill's bottom
