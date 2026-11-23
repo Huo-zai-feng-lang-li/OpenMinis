@@ -1486,6 +1486,7 @@ class AgentForegroundService : Service() {
                 clock = clock,
                 contentIntent = pendingIntent,
                 stopIntent = stopPendingIntent,
+                progressPct = (elapsedMs / 60_000L).toInt().coerceIn(3, 85),
             )
         }
 
@@ -1551,6 +1552,7 @@ class AgentForegroundService : Service() {
         clock: NotificationClock,
         contentIntent: PendingIntent,
         stopIntent: PendingIntent,
+        progressPct: Int,
     ): Notification {
         // [T-android-dynamic-island] A ProgressStyle only counts as a valid
         // *promotable* style when it carries at least one progress segment with
@@ -1636,19 +1638,24 @@ class AgentForegroundService : Service() {
             ?.railAccent
             ?.value ?: "indigo"
         val railAccentColor = if (railAccent == "indigo") 0xFF4F46E5.toInt() else 0xFFF59E0B.toInt()
-        // [T-island-rail-handle] 1.58: the user picked the seek-bar-handle
-        // mockup: no bookend dots, a light accent track, a wide sliding
-        // handle. (MIUI may still draw its own grey track - it ignored the
-        // 1.43 tint - a light tint only helps when the platform honours it.)
+        // [T-island-rail-2tone] 1.59: the user wants the seek-bar mockup
+        // exactly: a solid accent "worked" segment + a light accent
+        // "remaining" segment, handle parked at the boundary. Progress
+        // creeps with elapsed time (3% -> 85%) since an agent run has no
+        // real total. EXPERIMENT: MIUI ignored the 1.43 segment tint, so
+        // it may still paint its own grey/blue track - if the device
+        // report says so, we revert to the 1.58 indeterminate handle.
         val railTrackColor = if (railAccent == "indigo") 0xFFC7D2FE.toInt() else 0xFFFDE8C8.toInt()
+        val fillPct = progressPct.coerceIn(0, 100)
         val progressStyle = Notification.ProgressStyle()
-            .addProgressSegment(Notification.ProgressStyle.Segment(100).setColor(railTrackColor))
+            .addProgressSegment(Notification.ProgressStyle.Segment(fillPct).setColor(railAccentColor))
+            .addProgressSegment(Notification.ProgressStyle.Segment(100 - fillPct).setColor(railTrackColor))
             .setStyledByProgress(false)
             .setProgressStartIcon(android.graphics.drawable.Icon.createWithBitmap(progressRailDot(railAccentColor)))
             .setProgressEndIcon(android.graphics.drawable.Icon.createWithBitmap(progressRailDot(railAccentColor)))
             .setProgressTrackerIcon(android.graphics.drawable.Icon.createWithBitmap(progressRailCapsule(railAccentColor)))
-            .setProgressIndeterminate(true)
-            .setProgress(0)
+            .setProgressIndeterminate(false)
+            .setProgress(fillPct)
 
         val builder = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(smallIcon)
@@ -1729,12 +1736,12 @@ class AgentForegroundService : Service() {
         return bmp
     }
 
-    // [T-island-rail-handle] 1.58: the 24x12 dp handle - wider than the
-    // 1.56 capsule, reading as a seek-bar handle sliding on the light track.
+    // [T-island-rail-2tone] 1.59: the small 14x10 dp handle parked at the
+    // segment boundary - the seek-bar knob from the mockup.
     private fun progressRailCapsule(color: Int): android.graphics.Bitmap {
         val dp = resources.displayMetrics.density
-        val w = (24 * dp).toInt().coerceAtLeast(48)
-        val h = (12 * dp).toInt().coerceAtLeast(24)
+        val w = (14 * dp).toInt().coerceAtLeast(28)
+        val h = (10 * dp).toInt().coerceAtLeast(20)
         val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
         val c = android.graphics.Canvas(bmp)
         val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
