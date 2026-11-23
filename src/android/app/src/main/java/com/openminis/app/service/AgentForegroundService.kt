@@ -1603,11 +1603,19 @@ class AgentForegroundService : Service() {
         // sliver at the left edge instead of a full-width bar - while
         // keeping a positive length, which is what keeps the notification
         // promotable and the island chip alive.
+        // [T-island-animated-line] 1.45: MIUI draws the progress track at
+        // full card width and ignores both the segment length and the tint
+        // (1.43/1.44 - the grey line stayed), so the line cannot be made
+        // to disappear while keeping a promotable style. Make it a
+        // dynamic indicator instead of a dead bar: the system's
+        // indeterminate animation slides across it - a "working" pulse
+        // instead of a static line. Card colour keeps the tint so the
+        // moving block stays subtle.
         val progressStyle = Notification.ProgressStyle()
-            .addProgressSegment(Notification.ProgressStyle.Segment(1).setColor(0xFFF3F4F6.toInt()))
+            .addProgressSegment(Notification.ProgressStyle.Segment(100).setColor(0xFFF3F4F6.toInt()))
             .setStyledByProgress(false)
             .setProgressTrackerIcon(null)
-            .setProgressIndeterminate(false)
+            .setProgressIndeterminate(true)
             .setProgress(0)
 
         val builder = Notification.Builder(this, CHANNEL_ID)
