@@ -1619,10 +1619,17 @@ class AgentForegroundService : Service() {
         // experiment (1.47) proved the track cannot be removed at all
         // while keeping the island chip: MIUI draws the default blue line
         // regardless.
+        // [T-island-rail-icons] 1.49: the user wants the sliding block to
+        // look designed, not stock. API 36's ProgressStyle carries a
+        // tracker icon (the moving piece) plus start/end icons on the
+        // rail ends - all self-drawn bitmaps: a soft purple capsule
+        // slides between two small dots, reading as a progress rail.
         val progressStyle = Notification.ProgressStyle()
             .addProgressSegment(Notification.ProgressStyle.Segment(100).setColor(0xFFF3F4F6.toInt()))
             .setStyledByProgress(false)
-            .setProgressTrackerIcon(null)
+            .setProgressStartIcon(android.graphics.drawable.Icon.createWithBitmap(progressRailDot()))
+            .setProgressEndIcon(android.graphics.drawable.Icon.createWithBitmap(progressRailDot()))
+            .setProgressTrackerIcon(android.graphics.drawable.Icon.createWithBitmap(progressRailCapsule()))
             .setProgressIndeterminate(true)
             .setProgress(0)
 
@@ -1691,6 +1698,42 @@ class AgentForegroundService : Service() {
             Log.d(TAG, "promoted notification OK — hasPromotableCharacteristics=true")
         }
         return notification
+    }
+
+    /**
+     * [T-island-rail-icons] The rail-end dot: a 12 dp soft grey circle,
+     * the "from" mark of the progress rail.
+     */
+    private fun progressRailDot(): android.graphics.Bitmap {
+        val dp = resources.displayMetrics.density
+        val size = (12 * dp).toInt().coerceAtLeast(24)
+        val bmp = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+        val c = android.graphics.Canvas(bmp)
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        paint.color = 0xFFC7C9D2.toInt()
+        c.drawOval(0f, 0f, size.toFloat(), size.toFloat(), paint)
+        return bmp
+    }
+
+    /**
+     * [T-island-rail-icons] The sliding capsule: a 24x12 dp rounded pill
+     * in the app's purple accent, with a subtle white core - replaces the
+     * stock system block of the indeterminate animation.
+     */
+    private fun progressRailCapsule(): android.graphics.Bitmap {
+        val dp = resources.displayMetrics.density
+        val w = (24 * dp).toInt().coerceAtLeast(48)
+        val h = (12 * dp).toInt().coerceAtLeast(24)
+        val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+        val c = android.graphics.Canvas(bmp)
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        val radius = h / 2f
+        paint.color = 0xFF7C3AED.toInt()
+        c.drawRoundRect(0f, 0f, w.toFloat(), h.toFloat(), radius, radius, paint)
+        paint.color = 0x66FFFFFF
+        val inset = h * 0.25f
+        c.drawRoundRect(inset, inset, w - inset, h - inset, h / 4f, h / 4f, paint)
+        return bmp
     }
 
     /**
