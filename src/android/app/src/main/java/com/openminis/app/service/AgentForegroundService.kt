@@ -1585,18 +1585,17 @@ class AgentForegroundService : Service() {
         // ProgressStyle card posts below; the island chip shows task + timer.
         val largeIcon = islandLargeIcon()
         Log.d(TAG, "media variant build failed - ProgressStyle variant")
-        val progressStyle = Notification.ProgressStyle()
-            .addProgressSegment(Notification.ProgressStyle.Segment(100))
-            .setStyledByProgress(false)
-            .setProgressTrackerIcon(null)
-            .setProgressIndeterminate(isToolRunning && !isCompleted)
-            .setProgress(if (isCompleted) 100 else 0)
-
+        // [T-island-no-progress-line] 1.41: the ProgressStyle segment is what
+        // drew the blue progress line under the card that the user wants
+        // gone. No style at all: the card is our custom dark RemoteViews
+        // (title + status), promotion still rides the ongoing + promoted
+        // extras + short critical text. If MIUI drops the island chip
+        // without a promotable style, 1.42 re-adds a style with an
+        // invisible segment.
         val builder = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(smallIcon)
             .setContentTitle(titleText)
             .setContentText(collapsedText)
-            .setStyle(progressStyle)
             .apply { largeIcon?.let { setLargeIcon(it) } }
             // [T-island-dark-card] Our own dark rounded card in the shade
             // instead of the native white one (blue line + Stop removed).
