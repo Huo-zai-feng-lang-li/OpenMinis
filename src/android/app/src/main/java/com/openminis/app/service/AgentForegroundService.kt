@@ -1444,6 +1444,10 @@ class AgentForegroundService : Service() {
                 ?: "…"
             // [T-android-user-ask-chip] Time left to answer.
             AgentPhase.ASKING -> askChipText(asking?.expiresAtMs?.let { it - nowWallMs })
+            // [T-island-task-chip] The island chip shows the TASK, not just a
+            // bare timer: a short task label (8 chars max so MIUI does not
+            // stretch the pill) + the coarse 5 s timer.
+            AgentPhase.TOOL -> "${toolRowTitle(toolName!!, toolTitle).take(8)} ${chipTimerText(elapsedMs)}"
             else -> chipTimerText(elapsedMs)
         }
 
@@ -1471,26 +1475,6 @@ class AgentForegroundService : Service() {
             this,
             dynamicIslandUserEnabled,
         )
-        // [T-island-media-subtitle] The MIUI media panel draws its two text
-        // lines from the MediaSession metadata (big line = TITLE, small line
-        // = ARTIST), NOT from the content title/text - so the dark card
-        // showed "Minis / Minis" no matter what the agent was doing. Feed
-        // the phase's status line into ARTIST so the card carries the task
-        // text: tool status + counter, 思考中…, 正在输出…, 任务已完成,
-        // scheduled wait, 等待你的回答….
-        val mediaSubtitle = when (phase) {
-            AgentPhase.TOOL -> withRunCounter(humanizeToolStatus(toolStatus, toolName), firingCounter)
-            AgentPhase.THINKING -> getString(R.string.overlay_thinking)
-            AgentPhase.GENERATING -> getString(R.string.overlay_streaming)
-            AgentPhase.COMPLETED -> if (sessionCount > 0) {
-                getString(completedTextResFor(sessionCount), sessionLabel, timeString)
-            } else {
-                getString(completedTextResFor(0), timeString)
-            }
-            AgentPhase.WAITING -> shortCritical ?: getString(R.string.notif_scheduled_waiting)
-            AgentPhase.ASKING -> getString(R.string.user_ask_waiting)
-            AgentPhase.IDLE -> "Minis"
-        }
         if (dynamicIslandOn && !presenceOnly && Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) {
             return buildPromotedNotification(
                 titleText = titleText,
@@ -1502,7 +1486,6 @@ class AgentForegroundService : Service() {
                 clock = clock,
                 contentIntent = pendingIntent,
                 stopIntent = stopPendingIntent,
-                mediaSubtitle = mediaSubtitle,
             )
         }
 
@@ -1568,7 +1551,6 @@ class AgentForegroundService : Service() {
         clock: NotificationClock,
         contentIntent: PendingIntent,
         stopIntent: PendingIntent,
-        mediaSubtitle: String,
     ): Notification {
         // [T-android-dynamic-island] A ProgressStyle only counts as a valid
         // *promotable* style when it carries at least one progress segment with
@@ -1597,63 +1579,11 @@ class AgentForegroundService : Service() {
         // variant first and keep it only while it still qualifies for
         // promotion (hasPromotableCharacteristics below); anything else
         // falls through to the ProgressStyle variant, which keeps the chip.
+        // [T-island-plain-card] 1.40: the media variant (category + MediaStyle
+        // + session) is gone - the user wants one glance, not a music player:
+        // no seek bar, no cast glyph, no album art. The plain promoted
+        // ProgressStyle card posts below; the island chip shows task + timer.
         val largeIcon = islandLargeIcon()
-        // [T-island-no-seekbar] No MediaSession on the media variant: the
-        // session's transport row is what drew the 00:00-00:00 seek bar the
-        // user wants gone; the dark treatment is driven by category +
-        // MediaStyle alone (verified on-device in 1.32), so the card keeps
-        // its look. The small line now rides on contentText.
-        val mediaBuilder = Notification.Builder(this, CHANNEL_ID)
-            .setSmallIcon(smallIcon)
-            .setContentTitle(titleText)
-            .setContentText(mediaSubtitle)
-            .setOngoing(true)
-            .setShowWhen(clock.showWhen)
-            .setWhen(clock.whenMs)
-            .setUsesChronometer(clock.usesChronometer)
-            .setChronometerCountDown(clock.countDown)
-            .setOnlyAlertOnce(true)
-            .setContentIntent(contentIntent)
-            .setColorized(false)
-            // [T-island-media] The raw category string: the constant lives on
-            // androidx NotificationCompat, whose version here does not carry
-            // it - the literal is the same value.
-            .setCategory("android.app-notification-category-media")
-            .setStyle(
-                // The platform MediaStyle has no setMediaContentTitle/
-                // Description (those are androidx additions) - the title and
-                // subtitle come from the builder's content title/text and the
-                // session's metadata artwork.
-                // [T-island-session-back] 1.38's session-less test proved
-                // MIUI shows the plain white card and DROPS the island
-                // entirely: the black media island and its transport row
-                // (the 00:00 seek bar) come as a package with the session.
-                // Session restored: island + black card back, seek bar
-                // included; the small line still carries the task status
-                // via the metadata artist.
-                Notification.MediaStyle()
-                    .setMediaSession(islandMediaSession(stopIntent, titleText, mediaSubtitle).sessionToken)
-                    .setShowActionsInCompactView(),
-            )
-        largeIcon?.let { mediaBuilder.setLargeIcon(it) }
-        mediaBuilder.addExtras(android.os.Bundle().apply {
-            putBoolean(EXTRA_REQUEST_PROMOTED_ONGOING, true)
-        })
-        // [T-island-media-always] MIUI's dark media-island card is driven by
-        // the media category/style itself - NOT by hasPromotableCharacteristics
-        // (the status-bar chip is a bonus surface). 1.30/1.31 gated the
-        // media variant on that check and THREW IT AWAY on this device,
-        // leaving the white ProgressStyle card the user reported. Always
-        // post the media variant; the ProgressStyle builder below is now
-        // only the construction-failure fallback.
-        val mediaNotification = runCatching { mediaBuilder.build() }.getOrNull()
-        if (mediaNotification != null) {
-            Log.d(
-                TAG,
-                "media variant posted - promotable=${mediaNotification.hasPromotableCharacteristics()}",
-            )
-            return mediaNotification
-        }
         Log.d(TAG, "media variant build failed - ProgressStyle variant")
         val progressStyle = Notification.ProgressStyle()
             .addProgressSegment(Notification.ProgressStyle.Segment(100))

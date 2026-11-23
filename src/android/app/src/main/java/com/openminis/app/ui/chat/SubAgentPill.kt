@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Cancel
 import androidx.compose.material.icons.outlined.Groups
@@ -47,6 +48,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.shadow
@@ -273,17 +275,27 @@ private fun SubAgentListSheet(
                 .navigationBarsPadding()
                 .padding(horizontal = 20.dp, vertical = 14.dp),
         ) {
+            // [T-subagent-list-design] Elegant + glanceable: a bold title,
+            // a one-line caption, and one rounded card per live run
+            // (badge + name + status + accent clock).
             Text(
                 stringResource(R.string.subagent_pill_list_title, live.size),
-                fontSize = 18.sp,
+                fontSize = 17.sp,
                 fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 4.dp),
+            )
+            Text(
+                stringResource(R.string.subagent_pill_list_hint),
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                modifier = Modifier.padding(start = 4.dp, top = 3.dp, bottom = 12.dp),
             )
             if (live.isEmpty()) {
                 Text(
                     stringResource(R.string.subagent_pill_list_empty),
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                    modifier = Modifier.padding(top = 12.dp),
+                    modifier = Modifier.padding(vertical = 14.dp),
                 )
             } else {
                 live.forEach { job ->
@@ -291,31 +303,33 @@ private fun SubAgentListSheet(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.06f), RoundedCornerShape(16.dp))
                             .clickable { onPick(job) }
-                            .padding(vertical = 10.dp),
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(40.dp)
-                                .background(accent.copy(alpha = 0.16f), CircleShape)
-                                .border(0.75.dp, accent.copy(alpha = 0.35f), CircleShape),
+                                .size(36.dp)
+                                .background(accent.copy(alpha = 0.12f), CircleShape),
                             contentAlignment = Alignment.Center,
                         ) {
                             Icon(
                                 Icons.Outlined.Groups,
                                 contentDescription = null,
                                 tint = accent,
-                                modifier = Modifier.size(22.dp),
+                                modifier = Modifier.size(20.dp),
                             )
                         }
                         Column(
                             modifier = Modifier
                                 .weight(1f, fill = false)
-                                .padding(start = 12.dp),
+                                .padding(start = 12.dp, end = 8.dp),
                         ) {
                             Text(
                                 listRowTitle(job),
-                                fontSize = 14.sp,
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.Medium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -323,15 +337,16 @@ private fun SubAgentListSheet(
                             Text(
                                 listRowStatus(job),
                                 fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(top = 1.dp),
                             )
                         }
                         SubAgentPillModel.elapsed(job, now)?.let {
                             Text(
                                 it,
-                                fontSize = 14.sp,
+                                fontSize = 15.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 style = TabularDigits,
                                 color = accent,
@@ -438,10 +453,13 @@ private fun SubAgentPillCard(
                 // of a "+N" chip - one pill, badge says how many.
                 val total = state.others + 1
                 if (total > 1) {
+                    // [T-subagent-list-sheet] The original app's round count
+                    // badge: a solid accent disc with the total live count,
+                    // 20 dp so it reads at a glance next to the ring.
                     Box(
                         modifier = Modifier
                             .padding(start = 6.dp)
-                            .size(18.dp)
+                            .size(20.dp)
                             .background(accent, CircleShape),
                         contentAlignment = Alignment.Center,
                     ) {
