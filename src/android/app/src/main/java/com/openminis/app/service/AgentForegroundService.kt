@@ -1599,7 +1599,7 @@ class AgentForegroundService : Service() {
         // allowed: a positive-length segment is what keeps the
         // notification promotable and the island chip alive.)
         val progressStyle = Notification.ProgressStyle()
-            .addProgressSegment(Notification.ProgressStyle.Segment(100).setColor(0xFFF3F4F6))
+            .addProgressSegment(Notification.ProgressStyle.Segment(100).setColor(0xFFF3F4F6.toInt()))
             .setStyledByProgress(false)
             .setProgressTrackerIcon(null)
             .setProgressIndeterminate(false)
