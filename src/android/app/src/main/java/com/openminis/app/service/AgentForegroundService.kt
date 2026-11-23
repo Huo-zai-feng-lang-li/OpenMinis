@@ -1592,8 +1592,14 @@ class AgentForegroundService : Service() {
         // draws no visible line. The card itself is the plain native card:
         // the user wants pure white, not our dark RemoteViews inside the
         // shade card (the black-in-grey mix reported on 1.41).
+        // [T-island-segment-card-tint] 1.43: MIUI ignored the transparent
+        // segment tint and still drew the full-width blue line. Tint the
+        // segment to the shade card's own background instead - an opaque
+        // near-match reads as no line. (A pure zero-length segment is not
+        // allowed: a positive-length segment is what keeps the
+        // notification promotable and the island chip alive.)
         val progressStyle = Notification.ProgressStyle()
-            .addProgressSegment(Notification.ProgressStyle.Segment(100).setColor(0x00FFFFFF))
+            .addProgressSegment(Notification.ProgressStyle.Segment(100).setColor(0xFFF3F4F6))
             .setStyledByProgress(false)
             .setProgressTrackerIcon(null)
             .setProgressIndeterminate(false)
