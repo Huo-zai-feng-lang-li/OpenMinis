@@ -1629,8 +1629,6 @@ class AgentForegroundService : Service() {
             .setStyledByProgress(false)
             .setProgressStartIcon(android.graphics.drawable.Icon.createWithBitmap(progressRailDot()))
             .setProgressEndIcon(android.graphics.drawable.Icon.createWithBitmap(progressRailDot()))
-            .setProgressTrackerIcon(android.graphics.drawable.Icon.createWithBitmap(progressRailCapsule()))
-            .setProgressIndeterminate(true)
             .setProgress(0)
 
         val builder = Notification.Builder(this, CHANNEL_ID)
@@ -1704,20 +1702,19 @@ class AgentForegroundService : Service() {
      * [T-island-rail-icons] The rail-end dot: a 12 dp soft grey circle,
      * the "from" mark of the progress rail.
      */
-    // [T-island-rail-ring] 1.50: the user wants the rail ends to look
-    // designed, not stock grey dots - a hollow accent ring (purple,
-    // transparent centre, 2.5 px stroke) matching the sub-agent accent.
+    // [T-island-quiet-rail] 1.51: the user compared the card with text-only
+    // notifications (Doubao, Douyin) and wants the rail to stay quiet.
+    // No tracker capsule, no indeterminate slide, no purple rings -
+    // 6 dp light-grey bookend dots on the card-tinted track, so the
+    // card reads as title + status text with a barely-there rail.
     private fun progressRailDot(): android.graphics.Bitmap {
         val dp = resources.displayMetrics.density
-        val size = (14 * dp).toInt().coerceAtLeast(28)
+        val size = (6 * dp).toInt().coerceAtLeast(12)
         val bmp = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
         val c = android.graphics.Canvas(bmp)
         val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
-        paint.style = android.graphics.Paint.Style.STROKE
-        paint.strokeWidth = (2.5f * dp).coerceAtLeast(5f)
-        paint.color = 0xFF7C3AED.toInt()
-        val inset = paint.strokeWidth / 2f
-        c.drawCircle(size / 2f, size / 2f, size / 2f - inset, paint)
+        paint.color = 0xFFD0D2DC.toInt()
+        c.drawCircle(size / 2f, size / 2f, size / 2f, paint)
         return bmp
     }
 
