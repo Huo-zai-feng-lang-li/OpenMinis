@@ -1585,22 +1585,29 @@ class AgentForegroundService : Service() {
         // ProgressStyle card posts below; the island chip shows task + timer.
         val largeIcon = islandLargeIcon()
         Log.d(TAG, "media variant build failed - ProgressStyle variant")
-        // [T-island-no-progress-line] 1.41: the ProgressStyle segment is what
-        // drew the blue progress line under the card that the user wants
-        // gone. No style at all: the card is our custom dark RemoteViews
-        // (title + status), promotion still rides the ongoing + promoted
-        // extras + short critical text. If MIUI drops the island chip
-        // without a promotable style, 1.42 re-adds a style with an
-        // invisible segment.
+        // [T-island-invisible-segment] 1.42: a promoted notification needs a
+        // promotable style (1.41's style-less variant lost the island chip
+        // on this device), so the segment comes back - but tinted to the
+        // card's background (transparent) and never indeterminate, so it
+        // draws no visible line. The card itself is the plain native card:
+        // the user wants pure white, not our dark RemoteViews inside the
+        // shade card (the black-in-grey mix reported on 1.41).
+        val progressStyle = Notification.ProgressStyle()
+            .addProgressSegment(Notification.ProgressStyle.Segment(100).setColor(0x00FFFFFF))
+            .setStyledByProgress(false)
+            .setProgressTrackerIcon(null)
+            .setProgressIndeterminate(false)
+            .setProgress(0)
+
         val builder = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(smallIcon)
             .setContentTitle(titleText)
             .setContentText(collapsedText)
+            .setStyle(progressStyle)
             .apply { largeIcon?.let { setLargeIcon(it) } }
-            // [T-island-dark-card] Our own dark rounded card in the shade
-            // instead of the native white one (blue line + Stop removed).
-            .setCustomContentView(islandCardViews(titleText, collapsedText, smallIcon))
-            .setCustomBigContentView(islandCardViews(titleText, collapsedText, smallIcon))
+            // [T-island-plain-card] The native card, no custom RemoteViews:
+            // a plain white card with title + status, no mixed dark inner
+            // pill (reported ugly on 1.41).
             .setOngoing(true)
             // [T-android-notification-chronometer] Same rule as the compat
             // branch — the promoted chip is precisely where a frozen clock was
