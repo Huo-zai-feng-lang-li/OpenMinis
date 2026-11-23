@@ -1634,10 +1634,15 @@ class AgentForegroundService : Service() {
             ?.takeIf { it.subsystemsReady() }
             ?.backgroundSettingsRepository
             ?.railAccent
-            ?.value ?: "amber"
+            ?.value ?: "indigo"
         val railAccentColor = if (railAccent == "indigo") 0xFF4F46E5.toInt() else 0xFFF59E0B.toInt()
+        // [T-island-rail-handle] 1.58: the user picked the seek-bar-handle
+        // mockup: no bookend dots, a light accent track, a wide sliding
+        // handle. (MIUI may still draw its own grey track - it ignored the
+        // 1.43 tint - a light tint only helps when the platform honours it.)
+        val railTrackColor = if (railAccent == "indigo") 0xFFC7D2FE.toInt() else 0xFFFDE8C8.toInt()
         val progressStyle = Notification.ProgressStyle()
-            .addProgressSegment(Notification.ProgressStyle.Segment(100).setColor(0xFFF3F4F6.toInt()))
+            .addProgressSegment(Notification.ProgressStyle.Segment(100).setColor(railTrackColor))
             .setStyledByProgress(false)
             .setProgressStartIcon(android.graphics.drawable.Icon.createWithBitmap(progressRailDot(railAccentColor)))
             .setProgressEndIcon(android.graphics.drawable.Icon.createWithBitmap(progressRailDot(railAccentColor)))
@@ -1716,24 +1721,20 @@ class AgentForegroundService : Service() {
      * [T-island-rail-icons] The rail-end dot: a 12 dp soft grey circle,
      * the "from" mark of the progress rail.
      */
-    // [T-island-rail-accent] 1.52: solid 10 dp bookend dot in the accent hue.
+    // [T-island-rail-handle] 1.58: transparent end icon - suppresses the
+    // system default end marks, so the rail carries NO bookend dots.
     private fun progressRailDot(color: Int): android.graphics.Bitmap {
-        val dp = resources.displayMetrics.density
-        val size = (10 * dp).toInt().coerceAtLeast(20)
-        val bmp = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
-        val c = android.graphics.Canvas(bmp)
-        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
-        paint.color = color
-        c.drawCircle(size / 2f, size / 2f, size / 2f, paint)
+        val bmp = android.graphics.Bitmap.createBitmap(2, 2, android.graphics.Bitmap.Config.ARGB_8888)
+        bmp.eraseColor(android.graphics.Color.TRANSPARENT)
         return bmp
     }
 
-    // [T-island-rail-accent] 1.52: the 18x9 dp accent capsule - replaces the
-    // stock system block of the indeterminate animation.
+    // [T-island-rail-handle] 1.58: the 24x12 dp handle - wider than the
+    // 1.56 capsule, reading as a seek-bar handle sliding on the light track.
     private fun progressRailCapsule(color: Int): android.graphics.Bitmap {
         val dp = resources.displayMetrics.density
-        val w = (18 * dp).toInt().coerceAtLeast(36)
-        val h = (9 * dp).toInt().coerceAtLeast(18)
+        val w = (24 * dp).toInt().coerceAtLeast(48)
+        val h = (12 * dp).toInt().coerceAtLeast(24)
         val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
         val c = android.graphics.Canvas(bmp)
         val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)

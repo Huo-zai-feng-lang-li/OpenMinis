@@ -173,7 +173,7 @@ class BackgroundSettingsRepository(context: Context) {
         internal const val KEY_DYNAMIC_ISLAND_ENABLED = "dynamicIslandEnabled"
 
         internal const val KEY_RAIL_ACCENT = "railAccent"
-        internal const val DEFAULT_RAIL_ACCENT = "amber"
+        internal const val DEFAULT_RAIL_ACCENT = "indigo"
         internal val RAIL_ACCENTS = listOf("amber", "indigo")
 
         internal const val KEY_SCHEDULED_COUNTDOWN_LEAD = "scheduledCountdownLead"
