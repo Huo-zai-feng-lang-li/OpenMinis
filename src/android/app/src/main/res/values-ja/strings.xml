@@ -1209,6 +1209,7 @@
     <string name="settings_dynamic_island">Dynamic Island（ライブアップデート）</string>
     <string name="settings_dynamic_island_footer">Android 16 のステータスチップにエージェントの状態をリアルタイムで表示します。オンにすると、状態表示が 2 つ同時に出ないよう、フローティングのオーバーレイに代わって表示されます。</string>
     <string name="settings_dynamic_island_unsupported">お使いのシステムバージョンはまだライブアップデートに対応していません（Android 16 以降で、この機能が有効になっている必要があります）。</string>
+<string name="settings_rail_accent">レールアクセント</string>
     <string name="agent_loop_section_title">Minis が実行時に呼び出せるモデル</string>
     <string name="agent_loop_section_footer">Minis のタスク中、Agent は画像生成や要約など、自身のモデルでは行えないサブタスクのためにこれらのモデルを呼び出します。ターミナルから minis-model-use でも呼び出せます。Agent が認識するのはこれらだけです。</string>
     <string name="agent_loop_section_empty_hint">追加されたモデルやグループはありません</string>

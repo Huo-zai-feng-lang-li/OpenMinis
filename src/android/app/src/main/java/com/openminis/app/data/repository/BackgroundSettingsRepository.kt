@@ -73,6 +73,22 @@ class BackgroundSettingsRepository(context: Context) {
     }
 
     /**
+     * [T-island-rail-accent] 1.52: accent hue of the promoted island
+     * progress rail (bookend dots + sliding capsule): "amber" or
+     * "indigo". The user picked both design 3 and 5 in one build,
+     * switchable from Settings without reinstalling.
+     */
+    private val _railAccent =
+        MutableStateFlow(prefs.getString(KEY_RAIL_ACCENT, DEFAULT_RAIL_ACCENT) ?: DEFAULT_RAIL_ACCENT)
+    val railAccent: StateFlow<String> = _railAccent.asStateFlow()
+
+    fun setRailAccent(value: String) {
+        val safe = value.takeIf { it in RAIL_ACCENTS } ?: DEFAULT_RAIL_ACCENT
+        prefs.edit().putString(KEY_RAIL_ACCENT, safe).apply()
+        _railAccent.value = safe
+    }
+
+    /**
      * [FIX-261025-03] How long before a scheduled task's next run its chat
      * counts as active again, bringing back the ongoing notification, the
      * capsule / Live Updates countdown and the keep-alive. Stored as an index
@@ -105,6 +121,7 @@ class BackgroundSettingsRepository(context: Context) {
                 _taskNotificationsEnabled.value = p.getBoolean(key, DEFAULT_TASK_NOTIFICATIONS)
             KEY_BG_OVERLAY_ENABLED -> _backgroundOverlayEnabled.value = p.getBoolean(key, false)
             KEY_DYNAMIC_ISLAND_ENABLED -> _dynamicIslandEnabled.value = p.getBoolean(key, false)
+            KEY_RAIL_ACCENT -> _railAccent.value = p.getString(key, DEFAULT_RAIL_ACCENT) ?: DEFAULT_RAIL_ACCENT
             KEY_SCHEDULED_COUNTDOWN_LEAD -> _scheduledCountdownLead.value = readScheduledCountdownLead(p)
         }
     }
@@ -154,6 +171,10 @@ class BackgroundSettingsRepository(context: Context) {
         private const val KEY_BG_OVERLAY_LAND_X = "backgroundOverlayLandscapeX"
         private const val KEY_BG_OVERLAY_LAND_Y = "backgroundOverlayLandscapeY"
         internal const val KEY_DYNAMIC_ISLAND_ENABLED = "dynamicIslandEnabled"
+
+        internal const val KEY_RAIL_ACCENT = "railAccent"
+        internal const val DEFAULT_RAIL_ACCENT = "amber"
+        internal val RAIL_ACCENTS = listOf("amber", "indigo")
 
         internal const val KEY_SCHEDULED_COUNTDOWN_LEAD = "scheduledCountdownLead"
 

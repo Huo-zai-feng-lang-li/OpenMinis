@@ -1624,11 +1624,25 @@ class AgentForegroundService : Service() {
         // tracker icon (the moving piece) plus start/end icons on the
         // rail ends - all self-drawn bitmaps: a soft purple capsule
         // slides between two small dots, reading as a progress rail.
+        // [T-island-rail-accent] 1.52: the user wants BOTH design 3 (amber)
+        // and 5 (indigo) in one build - the accent is a Settings toggle
+        // (background.railAccent, default amber). Solid bookend dots + a
+        // sliding accent capsule; the segment stays card-tinted and
+        // indeterminate so the promoted chip survives (the 1.41
+        // experiment: no promotable style, no chip).
+        val railAccent = (applicationContext as? MinisApp)
+            ?.takeIf { it.subsystemsReady() }
+            ?.backgroundSettingsRepository
+            ?.railAccent
+            ?.value ?: "amber"
+        val railAccentColor = if (railAccent == "indigo") 0xFF4F46E5.toInt() else 0xFFF59E0B.toInt()
         val progressStyle = Notification.ProgressStyle()
             .addProgressSegment(Notification.ProgressStyle.Segment(100).setColor(0xFFF3F4F6.toInt()))
             .setStyledByProgress(false)
-            .setProgressStartIcon(android.graphics.drawable.Icon.createWithBitmap(progressRailDot()))
-            .setProgressEndIcon(android.graphics.drawable.Icon.createWithBitmap(progressRailDot()))
+            .setProgressStartIcon(android.graphics.drawable.Icon.createWithBitmap(progressRailDot(railAccentColor)))
+            .setProgressEndIcon(android.graphics.drawable.Icon.createWithBitmap(progressRailDot(railAccentColor)))
+            .setProgressTrackerIcon(android.graphics.drawable.Icon.createWithBitmap(progressRailCapsule(railAccentColor)))
+            .setProgressIndeterminate(true)
             .setProgress(0)
 
         val builder = Notification.Builder(this, CHANNEL_ID)
@@ -1702,19 +1716,29 @@ class AgentForegroundService : Service() {
      * [T-island-rail-icons] The rail-end dot: a 12 dp soft grey circle,
      * the "from" mark of the progress rail.
      */
-    // [T-island-quiet-rail] 1.51: the user compared the card with text-only
-    // notifications (Doubao, Douyin) and wants the rail to stay quiet.
-    // No tracker capsule, no indeterminate slide, no purple rings -
-    // 6 dp light-grey bookend dots on the card-tinted track, so the
-    // card reads as title + status text with a barely-there rail.
-    private fun progressRailDot(): android.graphics.Bitmap {
+    // [T-island-rail-accent] 1.52: solid 10 dp bookend dot in the accent hue.
+    private fun progressRailDot(color: Int): android.graphics.Bitmap {
         val dp = resources.displayMetrics.density
-        val size = (6 * dp).toInt().coerceAtLeast(12)
+        val size = (10 * dp).toInt().coerceAtLeast(20)
         val bmp = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
         val c = android.graphics.Canvas(bmp)
         val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
-        paint.color = 0xFFD0D2DC.toInt()
+        paint.color = color
         c.drawCircle(size / 2f, size / 2f, size / 2f, paint)
+        return bmp
+    }
+
+    // [T-island-rail-accent] 1.52: the 18x9 dp accent capsule - replaces the
+    // stock system block of the indeterminate animation.
+    private fun progressRailCapsule(color: Int): android.graphics.Bitmap {
+        val dp = resources.displayMetrics.density
+        val w = (18 * dp).toInt().coerceAtLeast(36)
+        val h = (9 * dp).toInt().coerceAtLeast(18)
+        val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+        val c = android.graphics.Canvas(bmp)
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        paint.color = color
+        c.drawRoundRect(0f, 0f, w.toFloat(), h.toFloat(), h / 2f, h / 2f, paint)
         return bmp
     }
 

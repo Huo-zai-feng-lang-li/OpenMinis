@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -98,6 +99,7 @@ fun BackgroundSettingsScreen(onBack: () -> Unit) {
     val backgroundOverlayEnabled by backgroundRepo.backgroundOverlayEnabled.collectAsState()
     // [T-android-dynamic-island] Live-Updates toggle + device capability.
     val dynamicIslandEnabled by backgroundRepo.dynamicIslandEnabled.collectAsState()
+    val railAccent by backgroundRepo.railAccent.collectAsState()
     val scheduledCountdownLead by backgroundRepo.scheduledCountdownLead.collectAsState()
 
     var ignoringOptimizations by remember {
@@ -251,6 +253,13 @@ fun BackgroundSettingsScreen(onBack: () -> Unit) {
                 } else {
                     stringResource(R.string.settings_dynamic_island_footer)
                 },
+            )
+            // [T-island-rail-accent] 1.52: amber / indigo rail accent,
+            // both in one build, switchable without reinstalling.
+            Spacer(Modifier.size(8.dp))
+            RailAccentRow(
+                selected = railAccent,
+                onSelect = { backgroundRepo.setRailAccent(it) },
             )
 
             // [FIX-261025-03] When a waiting scheduled task's chat becomes
@@ -455,6 +464,59 @@ private fun BgRow(
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RailAccentRow(selected: String, onSelect: (String) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = stringResource(R.string.settings_rail_accent),
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+        )
+        listOf("amber" to 0xFFF59E0B, "indigo" to 0xFF4F46E5).forEach { (name, color) ->
+            val isSel = selected == name
+            Box(
+                modifier = Modifier
+                    .padding(start = 10.dp)
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(
+                        if (isSel) Color(color).copy(alpha = 0.18f)
+                        else MaterialTheme.colorScheme.surfaceContainerHigh,
+                        RoundedCornerShape(18.dp),
+                    )
+                    .clickable { onSelect(name) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(22.dp)
+                        .clip(RoundedCornerShape(11.dp))
+                        .background(Color(color), RoundedCornerShape(11.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (isSel) {
+                        Icon(
+                            Icons.Filled.Check,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    }
+                }
             }
         }
     }
