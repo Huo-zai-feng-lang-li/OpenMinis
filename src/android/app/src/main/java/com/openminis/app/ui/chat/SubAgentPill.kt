@@ -77,6 +77,12 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.openminis.app.R
 import com.openminis.app.agent.jobs.AgentJob
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import com.openminis.app.debug.ChatViewModelStore
+import com.openminis.app.debug.HeadlessChatRunner
+import kotlinx.coroutines.delay
 import com.openminis.app.agent.jobs.AgentJobRegistry
 import com.openminis.app.agent.jobs.AgentJobState
 import com.openminis.app.logging.AppLogger
@@ -232,9 +238,10 @@ internal fun SubAgentPill(currentSessionId: () -> String) {
         )
     }
     openStatus?.let { job ->
-        SubAgentStatusDialog(
+        SubAgentRunDetailSheet(
             job = job,
             liveJob = AgentJobRegistry.job(job.id),
+            now = now,
             onDismiss = { openStatus = null },
             onStop = { confirmStop = job },
         )
@@ -516,45 +523,189 @@ private fun SubAgentPillCard(
 
 /** The status dialog the tap opens: identity + live facts + the two actions. */
 @Composable
-private fun SubAgentStatusDialog(
+@Composable
+/**
+ * [T-subagent-pill-full-detail] 1.53: tapping a row in the pill's bottom
+ * list opens the SAME full detail the inline sub-agent block shows -
+ * facts table, stat chips, task, tool timeline, steer + stop - instead
+ * of the old two-layer popup (bottom sheet, then a small central card
+ * with just time + turn count).
+ */
+private fun SubAgentRunDetailSheet(
     job: AgentJob,
     liveJob: AgentJob?,
+    now: Long,
     onDismiss: () -> Unit,
     onStop: () -> Unit,
 ) {
-    val accent = helperAccent()
+    val context = LocalContext.current
     val live = liveJob ?: job
-    val running = live.state == AgentJobState.RUNNING
+    val running = live.state == AgentJobState.RUNNING || live.state == AgentJobState.PENDING
     val name = live.agentName?.takeIf { it.isNotBlank() }
         ?: live.title?.takeIf { it.isNotBlank() }
         ?: stringResource(R.string.subagent_pill_dialog_title)
-    val facts = buildList {
-        live.modelLabel?.takeIf { it.isNotBlank() }?.let { add(it) }
-        SubAgentPillModel.elapsed(live, System.currentTimeMillis())?.let { add(it) }
-        live.roundCount?.takeIf { it > 0 }?.let { add(stringResource(R.string.agent_callback_turn, it)) }
+    val accent = helperAccent()
+
+    // Same digest read loop as HelperDetailContent: while the run is
+    // live, re-acquire the child from the CHILD pool and merge the
+    // streaming overlay; one read once it settles.
+    val cid = live.runSessionId
+    var digest by remember(cid) { mutableStateOf<SubAgentRunDigest?>(null) }
+    LaunchedEffect(cid, running) {
+        if (cid == null) return@LaunchedEffect
+        while (true) {
+            val vm = runCatching {
+                HeadlessChatRunner.viewModelFor(context, cid, ChatViewModelStore.PoolKind.CHILD)
+            }.getOrNull()
+            vm?.awaitSessionLoaded()
+            if (vm != null) {
+                val msgs = vm.let { v ->
+                    val canonical = v.messages.value
+                    val stream = v.streamingById.value
+                    if (stream.isEmpty()) canonical else mergeStreamingOverlay(canonical, stream)
+                }
+                val stats = runCatching { vm.loadSessionTokenStats() }.getOrNull()
+                digest = SubAgentRunDigest.from(
+                    msgs,
+                    turns = stats?.loopCount ?: 0,
+                    tokensIn = stats?.input ?: 0L,
+                    tokensOut = stats?.output ?: 0L,
+                )
+            }
+            if (!running) break
+            delay(3_000L)
+        }
     }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(name, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold), color = accent)
-        },
-        text = {
-            Text(
-                if (facts.isEmpty()) stringResource(R.string.subagent_pill_waiting) else facts.joinToString(" · "),
-                style = MaterialTheme.typography.bodySmall,
-            )
-        },
-        confirmButton = {
+
+    val rows = buildList {
+        live.modelOrigin?.takeIf { it.isNotBlank() }?.let {
+            add(Triple(stringResource(R.string.agent_detail_model_strategy), it, false))
+        }
+        live.modelLabel?.takeIf { it.isNotBlank() }?.let {
+            add(Triple(stringResource(R.string.agent_detail_model_actual), it, false))
+        }
+        live.tierUsed?.let { add(Triple(stringResource(R.string.agent_detail_model_tier), it, false)) }
+        live.startedAtMs?.let {
+            add(Triple(stringResource(R.string.subagent_detail_started), subAgentClockLabel(it), true))
+        }
+        if (!running) live.finishedAtMs?.let {
+            add(Triple(stringResource(R.string.subagent_detail_finished), subAgentClockLabel(it), true))
+        }
+        add(Triple(stringResource(R.string.agent_detail_job), live.id.take(8), true))
+    }
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 14.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .background(accent.copy(alpha = 0.12f), CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Outlined.Groups,
+                        contentDescription = null,
+                        tint = accent,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                Column(modifier = Modifier.weight(1f, fill = false).padding(start = 12.dp)) {
+                    Text(
+                        name,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        buildList {
+                            add(helperStatusLabel(live.state.wire))
+                            live.roundCount?.takeIf { it > 0 }?.let { add(stringResource(R.string.agent_callback_turn, it)) }
+                        }.joinToString(" · "),
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                    )
+                }
+                SubAgentPillModel.elapsed(live, now)?.let {
+                    Text(
+                        it,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        style = TabularDigits,
+                        color = accent,
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
+            }
+            if (rows.isNotEmpty()) {
+                Spacer(Modifier.size(12.dp))
+                AgentDetailCard(
+                    title = stringResource(R.string.subagent_pill_detail_title),
+                    icon = Icons.Outlined.Groups,
+                    iconTint = accent,
+                    body = {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            for ((label, value, _) in rows) {
+                                Row(
+                                    verticalAlignment = Alignment.Top,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Text(
+                                        label,
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        modifier = Modifier.width(84.dp),
+                                    )
+                                    Text(
+                                        value,
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                    )
+                                }
+                            }
+                        }
+                    },
+                )
+            }
+            digest?.let { d ->
+                if (!d.isEmpty) {
+                    Spacer(Modifier.size(12.dp))
+                    SubAgentStatChips(d, remainingMs = null, budgetMinutes = null)
+                }
+            }
+            live.prompt?.takeIf { it.isNotBlank() }?.let {
+                Spacer(Modifier.size(12.dp))
+                SubAgentTaskCard(SubAgentTaskArgs(task = it))
+            }
+            digest?.takeIf { it.total > 0 }?.let {
+                Spacer(Modifier.size(12.dp))
+                SubAgentToolTimelineCard(it)
+            }
+            cid?.let { id ->
+                Spacer(Modifier.size(12.dp))
+                SubAgentActionsCard(childSessionId = id, canSteer = running)
+            }
             if (running) {
-                TextButton(onClick = { onDismiss(); onStop() }) {
+                Spacer(Modifier.size(8.dp))
+                TextButton(
+                    onClick = { onDismiss(); onStop() },
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                ) {
                     Text(stringResource(R.string.subagent_pill_stop), color = MaterialTheme.colorScheme.error)
                 }
             }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.sched_pill_not_now)) }
-        },
-    )
+        }
+    }
 }
 
 /** One line for TalkBack, the pill's whole state (iOS accessibilityText analogue). */

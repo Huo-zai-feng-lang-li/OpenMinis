@@ -593,7 +593,8 @@ internal fun SubAgentActionsCard(childSessionId: String, canSteer: Boolean) {
     val focus = LocalFocusManager.current
     val accent = helperAccent()
     var draft by rememberSaveable(childSessionId) { mutableStateOf("") }
-    var sentCount by remember(childSessionId) { mutableIntStateOf(0) }
+    var steered by rememberSaveable(childSessionId) { mutableStateOf<List<String>>(emptyList()) }
+    var steerFailed by remember(childSessionId) { mutableStateOf(false) }
     var confirmStop by remember { mutableStateOf(false) }
     val isBlank = draft.isBlank()
 
@@ -619,9 +620,12 @@ internal fun SubAgentActionsCard(childSessionId: String, canSteer: Boolean) {
                         enabled = !isBlank,
                         onClick = {
                             if (SubAgentUserSteer.send(draft, childSessionId)) {
+                                steered = steered + draft
+                                steerFailed = false
                                 draft = ""
-                                sentCount++
                                 focus.clearFocus()
+                            } else {
+                                steerFailed = true
                             }
                         },
                     ) {
@@ -631,10 +635,33 @@ internal fun SubAgentActionsCard(childSessionId: String, canSteer: Boolean) {
                         )
                     }
                 }
+                // [T-subagent-steer-receipt] 1.53: an explicit receipt - the
+                // user could not tell a queued steer from a silent failure
+                // (the old version only swapped the hint line, and a refused
+                // send changed nothing on screen).
                 Text(
-                    stringResource(if (sentCount > 0) R.string.subagent_detail_steer_sent else R.string.subagent_detail_steer_note),
-                    fontSize = 11.sp, color = ChatColors.secondaryText,
+                    stringResource(
+                        when {
+                            steerFailed -> R.string.subagent_detail_steer_failed
+                            steered.isNotEmpty() -> R.string.subagent_detail_steer_queued
+                            else -> R.string.subagent_detail_steer_note
+                        },
+                    ),
+                    fontSize = 11.sp,
+                    color = if (steerFailed) HelperStatusRed else ChatColors.secondaryText,
                 )
+                if (steered.isNotEmpty()) {
+                    Text(
+                        stringResource(R.string.subagent_detail_steer_log),
+                        fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = ChatColors.secondaryText,
+                    )
+                    steered.forEachIndexed { i, text ->
+                        Text(
+                            "${i + 1}. $text",
+                            fontSize = 11.sp, color = ChatColors.tertiaryText, maxLines = 2,
+                        )
+                    }
+                }
             }
             Row(
                 modifier = Modifier
