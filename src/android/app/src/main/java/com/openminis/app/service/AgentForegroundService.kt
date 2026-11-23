@@ -1704,14 +1704,20 @@ class AgentForegroundService : Service() {
      * [T-island-rail-icons] The rail-end dot: a 12 dp soft grey circle,
      * the "from" mark of the progress rail.
      */
+    // [T-island-rail-ring] 1.50: the user wants the rail ends to look
+    // designed, not stock grey dots - a hollow accent ring (purple,
+    // transparent centre, 2.5 px stroke) matching the sub-agent accent.
     private fun progressRailDot(): android.graphics.Bitmap {
         val dp = resources.displayMetrics.density
-        val size = (12 * dp).toInt().coerceAtLeast(24)
+        val size = (14 * dp).toInt().coerceAtLeast(28)
         val bmp = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
         val c = android.graphics.Canvas(bmp)
         val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
-        paint.color = 0xFFC7C9D2.toInt()
-        c.drawOval(0f, 0f, size.toFloat(), size.toFloat(), paint)
+        paint.style = android.graphics.Paint.Style.STROKE
+        paint.strokeWidth = (2.5f * dp).coerceAtLeast(5f)
+        paint.color = 0xFF7C3AED.toInt()
+        val inset = paint.strokeWidth / 2f
+        c.drawCircle(size / 2f, size / 2f, size / 2f - inset, paint)
         return bmp
     }
 
