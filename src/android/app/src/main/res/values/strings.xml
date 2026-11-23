@@ -1423,7 +1423,7 @@
 <string name="settings_rail_accent">Island rail accent</string>
     <string name="subagent_pill_detail_title">Run details</string>
     <string name="subagent_detail_steer_queued">Sent - the sub agent picks it up at its next turn</string>
-    <string name="subagent_detail_steer_failed">Couldn't send: this run is no longer running</string>
+    <string name="subagent_detail_steer_failed">Send failed: this run is no longer running</string>
     <string name="subagent_detail_steer_log">Your instructions</string>
 
     <!-- T182 agent loop section i18n -->
