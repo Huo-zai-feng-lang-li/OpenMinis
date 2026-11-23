@@ -1,5 +1,5 @@
-package com.openminis.app.ui.chat
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+package com.openminis.app.ui.chat
 
 import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
