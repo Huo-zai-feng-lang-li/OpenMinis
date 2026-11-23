@@ -84,6 +84,7 @@ import com.openminis.app.debug.HeadlessChatRunner
 import kotlinx.coroutines.delay
 import com.openminis.app.agent.jobs.AgentJobRegistry
 import com.openminis.app.agent.jobs.AgentJobState
+import com.openminis.app.agent.jobs.AgentJobTarget
 import com.openminis.app.logging.AppLogger
 import java.util.Locale
 import kotlinx.coroutines.delay
@@ -548,6 +549,48 @@ private fun SubAgentRunDetailSheet(
     // live, re-acquire the child from the CHILD pool and merge the
     // streaming overlay; one read once it settles.
     val cid = live.runSessionId
+
+    // [T-subagent-pill-reuse-sheet] 1.57: reuse the SAME "Minis Computer"
+    // sheet the inline sub-agent block opens (ToolDetailSheet around
+    // HelperDetailContent) instead of a lesser hand-rolled copy. Resolve
+    // the parent session's subagent_task block from the job's target and
+    // hand it over; fall back to the card stack below only when the
+    // block cannot be found.
+    val parentSid = live.target.parentSessionIdOrNull
+    val toolUseId = (live.target as? AgentJobTarget.ChildOfCurrent)?.parentToolUseId
+    var helperBlock by remember(cid) { mutableStateOf<AssistantBlock?>(null) }
+    LaunchedEffect(parentSid, toolUseId) {
+        if (parentSid == null || cid == null) return@LaunchedEffect
+        val vm = runCatching {
+            HeadlessChatRunner.viewModelFor(context, parentSid, ChatViewModelStore.PoolKind.NORMAL)
+        }.getOrNull()
+        vm?.awaitSessionLoaded()
+        if (vm == null) return@LaunchedEffect
+        val msgs = vm.let { v ->
+            val canonical = v.messages.value
+            val stream = v.streamingById.value
+            if (stream.isEmpty()) canonical else mergeStreamingOverlay(canonical, stream)
+        }
+        val found = msgs.asSequence()
+            .filter { it.role == "assistant" }
+            .flatMap { it.toolBlocks.asSequence() }
+            .firstOrNull { b ->
+                (toolUseId != null && b.id == toolUseId) ||
+                    (b.toolName == com.openminis.app.agent.jobs.HelperRunner.TOOL_NAME && b.content.contains(cid))
+            }
+        if (found != null) helperBlock = found
+    }
+    helperBlock?.let { b ->
+        ToolDetailSheet(
+            toolBlocks = listOf(b),
+            initialIndex = 0,
+            onDismiss = onDismiss,
+        )
+        return
+    }
+
+    // [T-subagent-pill-reuse-sheet] 1.57: fallback card stack for jobs
+    // whose parent block could not be resolved.
     var digest by remember(cid) { mutableStateOf<SubAgentRunDigest?>(null) }
     LaunchedEffect(cid, running) {
         if (cid == null) return@LaunchedEffect
