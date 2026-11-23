@@ -1598,8 +1598,13 @@ class AgentForegroundService : Service() {
         // near-match reads as no line. (A pure zero-length segment is not
         // allowed: a positive-length segment is what keeps the
         // notification promotable and the island chip alive.)
+        // [T-island-tiny-segment] 1.44: the card-tinted 100 % segment still
+        // read as a grey line (1.43). Collapse the segment to 1 % - a
+        // sliver at the left edge instead of a full-width bar - while
+        // keeping a positive length, which is what keeps the notification
+        // promotable and the island chip alive.
         val progressStyle = Notification.ProgressStyle()
-            .addProgressSegment(Notification.ProgressStyle.Segment(100).setColor(0xFFF3F4F6.toInt()))
+            .addProgressSegment(Notification.ProgressStyle.Segment(1).setColor(0xFFF3F4F6.toInt()))
             .setStyledByProgress(false)
             .setProgressTrackerIcon(null)
             .setProgressIndeterminate(false)
