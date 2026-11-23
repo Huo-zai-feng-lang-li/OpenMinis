@@ -1611,16 +1611,19 @@ class AgentForegroundService : Service() {
         // indeterminate animation slides across it - a "working" pulse
         // instead of a static line. Card colour keeps the tint so the
         // moving block stays subtle.
-        // [T-island-zero-segment] 1.47 (Alipay reference): the style object
-        // stays attached - the island chip may key on its presence - but
-        // carries ZERO segments, so MIUI has no track to draw. 1.41
-        // proved "no style" kills the chip; this untested middle state
-        // decides whether a line-free island is possible. If the chip
-        // still dies, 1.48 restores the 1.45 tinted indeterminate line.
+        // [T-island-final-145] 1.48: the user accepted the 1.45 form as
+        // the final one: card-tinted segment (reads as a light-grey track,
+        // MIUI ignores both the tint and the length but draws the track
+        // with it) plus the system's indeterminate animation - a sliding
+        // dot, a "working" pulse instead of a dead bar. The zero-segment
+        // experiment (1.47) proved the track cannot be removed at all
+        // while keeping the island chip: MIUI draws the default blue line
+        // regardless.
         val progressStyle = Notification.ProgressStyle()
+            .addProgressSegment(Notification.ProgressStyle.Segment(100).setColor(0xFFF3F4F6.toInt()))
             .setStyledByProgress(false)
             .setProgressTrackerIcon(null)
-            .setProgressIndeterminate(false)
+            .setProgressIndeterminate(true)
             .setProgress(0)
 
         val builder = Notification.Builder(this, CHANNEL_ID)
