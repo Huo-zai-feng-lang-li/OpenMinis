@@ -1646,16 +1646,19 @@ class AgentForegroundService : Service() {
         // it may still paint its own grey/blue track - if the device
         // report says so, we revert to the 1.58 indeterminate handle.
         val railTrackColor = if (railAccent == "indigo") 0xFFC7D2FE.toInt() else 0xFFFDE8C8.toInt()
-        val fillPct = progressPct.coerceIn(0, 100)
+        // [T-island-rail-final] 1.60: back to the 1.58 indeterminate
+        // handle - the 1.59 two-tone experiment proved MIUI paints its
+        // own grey track (segment colors ignored) and a parked handle
+        // reads as a dead bar. Final form: no end dots, light-tinted
+        // track (best effort), small sliding handle.
         val progressStyle = Notification.ProgressStyle()
-            .addProgressSegment(Notification.ProgressStyle.Segment(fillPct).setColor(railAccentColor))
-            .addProgressSegment(Notification.ProgressStyle.Segment(100 - fillPct).setColor(railTrackColor))
+            .addProgressSegment(Notification.ProgressStyle.Segment(100).setColor(railTrackColor))
             .setStyledByProgress(false)
             .setProgressStartIcon(android.graphics.drawable.Icon.createWithBitmap(progressRailDot(railAccentColor)))
             .setProgressEndIcon(android.graphics.drawable.Icon.createWithBitmap(progressRailDot(railAccentColor)))
             .setProgressTrackerIcon(android.graphics.drawable.Icon.createWithBitmap(progressRailCapsule(railAccentColor)))
-            .setProgressIndeterminate(false)
-            .setProgress(fillPct)
+            .setProgressIndeterminate(true)
+            .setProgress(0)
 
         val builder = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(smallIcon)
